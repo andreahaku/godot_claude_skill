@@ -10,7 +10,7 @@
  *   GOOGLE_AI_API_KEY   - Google AI API key (for Gemini/Imagen)
  *   OPENAI_API_KEY      - OpenAI API key (for DALL-E)
  *   ASSET_GEN_PROVIDER  - "gemini" (default if Google key set) or "openai"
- *   GEMINI_IMAGE_MODEL  - Model name (default: imagen-3.0-generate-001)
+ *   GEMINI_IMAGE_MODEL  - Model name (default: imagen-4.0-generate-001)
  */
 
 import { mkdirSync, existsSync } from "fs";
@@ -23,29 +23,34 @@ const PROVIDER =
   process.env.ASSET_GEN_PROVIDER ||
   (GOOGLE_API_KEY ? "gemini" : OPENAI_API_KEY ? "openai" : "");
 const GEMINI_MODEL =
-  process.env.GEMINI_IMAGE_MODEL || "imagen-3.0-generate-001";
+  process.env.GEMINI_IMAGE_MODEL || "imagen-4.0-generate-001";
+
+// Universal negative prompt appended to all generations
+const UNIVERSAL_NEGATIVE =
+  "no text, no labels, no words, no letters, no numbers, no watermarks, no signatures, no annotations, no captions";
 
 // Style presets that enhance prompts for game asset generation
 const STYLE_PRESETS: Record<string, string> = {
   pixel_art:
-    "pixel art style, crisp pixels, no anti-aliasing, retro game art, transparent background",
+    "pixel art style, crisp sharp pixels, no anti-aliasing, no smoothing, retro 16-bit game art, solid flat colors, transparent PNG background, single clean image",
   pixel_art_character:
-    "pixel art character sprite, side view, crisp pixels, no anti-aliasing, transparent background, game-ready",
+    "pixel art character sprite, crisp sharp pixels, no anti-aliasing, no smoothing, solid flat colors, black outline, transparent PNG background, single character centered in frame, game-ready asset",
   pixel_art_tileset:
-    "pixel art tileset, top-down view, crisp pixels, seamless tiles, retro game art, consistent style",
+    "pixel art tileset, top-down view, crisp sharp pixels, no anti-aliasing, seamless tile edges, consistent art style across all tiles, tiles arranged in a strict uniform grid, each tile same size, retro game art",
   hand_drawn:
-    "hand-drawn illustration style, game art, clean lines, vibrant colors",
+    "hand-drawn illustration style, game art, clean defined lines, vibrant colors, transparent PNG background, single clean image",
   realistic:
-    "realistic detailed texture, physically-based rendering ready, game asset",
-  ui: "clean UI element, flat design, sharp edges, transparent background, game interface",
+    "realistic detailed texture, physically-based rendering ready, game asset, seamless edges where applicable",
+  ui: "clean UI element, flat design, sharp vector-like edges, transparent PNG background, game interface element, minimal design",
   tileset:
-    "seamless tileable pattern, game tileset, consistent style, top-down perspective",
-  icon: "game icon, clear silhouette, simple recognizable design, transparent background",
+    "seamless tileable pattern, game tileset, consistent style, top-down perspective, tiles in strict uniform grid, each tile same dimensions",
+  icon: "game icon, clear bold silhouette, simple instantly recognizable design, transparent PNG background, centered in frame, single object",
   character:
-    "character sprite, clear outline, game-ready, transparent background",
-  environment: "environment art, game background, atmospheric, detailed",
+    "character sprite, clear outline, game-ready, transparent PNG background, single character centered, clean edges",
+  environment:
+    "environment art, game background, atmospheric, detailed, wide scene composition",
   spritesheet:
-    "spritesheet with multiple frames arranged in a grid, consistent size per frame, transparent background, game-ready",
+    "spritesheet with multiple frames in a single horizontal row from left to right, each frame exactly the same size, evenly spaced, consistent style across all frames, transparent PNG background, game-ready animation frames",
 };
 
 interface GenerateOptions {
@@ -124,7 +129,7 @@ async function generateWithGeminiContent(
   }
 
   const model =
-    process.env.GEMINI_CONTENT_MODEL || "gemini-2.0-flash-preview-image-generation";
+    process.env.GEMINI_CONTENT_MODEL || "gemini-2.5-flash-image";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GOOGLE_API_KEY}`;
 
   const response = await fetch(url, {
@@ -251,7 +256,7 @@ async function main() {
       '  ASSET_GEN_PROVIDER  - "gemini" (default) or "openai"'
     );
     console.error(
-      "  GEMINI_IMAGE_MODEL  - Imagen model (default: imagen-3.0-generate-001)"
+      "  GEMINI_IMAGE_MODEL  - Imagen model (default: imagen-4.0-generate-001)"
     );
     process.exit(1);
   }
@@ -293,14 +298,15 @@ async function main() {
     process.exit(1);
   }
 
-  // Enhance prompt with style preset
+  // Enhance prompt with style preset and negative constraints
   let prompt = basePrompt;
   if (options.style && STYLE_PRESETS[options.style]) {
     prompt = `${basePrompt}. Style: ${STYLE_PRESETS[options.style]}`;
   }
-  if (options.negative) {
-    prompt += `. Do NOT include: ${options.negative}`;
-  }
+  const negatives = [UNIVERSAL_NEGATIVE, options.negative]
+    .filter(Boolean)
+    .join(", ");
+  prompt += `. Do NOT include: ${negatives}`;
 
   // Resolve output path
   const { fullPath, resPath } = resolveOutputPath(options.output, projectDir);
