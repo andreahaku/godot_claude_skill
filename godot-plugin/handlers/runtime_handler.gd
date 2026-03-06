@@ -8,6 +8,11 @@ extends RefCounted
 ## start_recording, stop_recording, replay_recording,
 ## find_nodes_by_script, get_autoload, find_ui_elements,
 ## click_button_by_text, wait_for_node, batch_get_properties
+##
+## NOTE: Engine.get_main_loop() returns the EDITOR's SceneTree, not the game's.
+## The game runs as a separate process. These commands operate on the editor's
+## tree which mirrors the game scene while playing. For true game introspection,
+## a debug bridge (e.g. EditorDebuggerPlugin) would be needed.
 
 var _editor: EditorInterface
 var _recording_events: Array = []

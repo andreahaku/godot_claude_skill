@@ -26,17 +26,8 @@ func get_commands() -> Dictionary:
 	}
 
 
-func _find_node(path: String) -> Node:
-	var root = _editor.get_edited_scene_root()
-	if root == null:
-		return null
-	if path == "" or path == root.name:
-		return root
-	return root.get_node_or_null(path)
-
-
 func _get_animation_player(node_path: String) -> AnimationPlayer:
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node is AnimationPlayer:
 		return node
 	return null

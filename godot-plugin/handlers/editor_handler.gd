@@ -84,10 +84,24 @@ func get_game_screenshot(params: Dictionary) -> Dictionary:
 	if not _editor.is_playing_scene():
 		return {"error": "No game is currently running", "code": "NOT_PLAYING"}
 
-	# The game runs in a separate process, so we need to use the debugger
-	# For now, we use a EditorScript approach
-	return {"error": "Game screenshot requires the game debug bridge (planned)", "code": "NOT_IMPLEMENTED",
-		"suggestions": ["Use get_editor_screenshot for editor captures"]}
+	# The game runs in a separate process — capture the editor's main viewport
+	# which shows the running game preview
+	var viewport = Engine.get_main_loop().root
+	if viewport == null:
+		return {"error": "Cannot access viewport", "code": "NO_VIEWPORT"}
+
+	var img = viewport.get_texture().get_image()
+	if img == null:
+		return {"error": "Failed to capture screenshot", "code": "CAPTURE_FAILED"}
+
+	var abs_path = ProjectSettings.globalize_path(save_path)
+	var err = img.save_png(abs_path)
+	if err != OK:
+		return {"error": "Failed to save screenshot: %s" % error_string(err), "code": "SAVE_ERROR"}
+
+	var buffer = img.save_png_to_buffer()
+	var base64 = Marshalls.raw_to_base64(buffer)
+	return {"path": save_path, "width": img.get_width(), "height": img.get_height(), "base64": base64}
 
 
 func compare_screenshots(params: Dictionary) -> Dictionary:

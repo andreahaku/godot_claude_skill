@@ -40,6 +40,10 @@ func handle(id: String, command: String, params: Dictionary) -> void:
 	var handler: Callable = _handlers[command]
 	var result = await handler.call(params)
 
+	if result == null:
+		_ws.send_response(peer_id, id, true, {})
+		return
+
 	# Send response based on result type
 	if result is Dictionary:
 		if result.has("error"):
@@ -51,8 +55,6 @@ func handle(id: String, command: String, params: Dictionary) -> void:
 			)
 		else:
 			_ws.send_response(peer_id, id, true, result)
-	elif result == null:
-		_ws.send_response(peer_id, id, true, {})
 	else:
 		_ws.send_response(peer_id, id, true, {"value": result})
 

@@ -145,6 +145,10 @@ func simulate_sequence(params: Dictionary) -> Dictionary:
 				result = simulate_mouse_move(step)
 			"action":
 				result = simulate_action(step)
+			"wait":
+				var duration: float = step.get("duration", 0.1)
+				await Engine.get_main_loop().create_timer(duration).timeout
+				result = {"waited": duration}
 			_:
 				result = {"error": "Unknown step type: %s" % step_type}
 

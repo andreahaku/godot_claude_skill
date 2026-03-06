@@ -25,15 +25,6 @@ func get_commands() -> Dictionary:
 	}
 
 
-func _find_node(path: String) -> Node:
-	var root = _editor.get_edited_scene_root()
-	if root == null:
-		return null
-	if path == "" or path == root.name:
-		return root
-	return root.get_node_or_null(path)
-
-
 func setup_navigation_region(params: Dictionary) -> Dictionary:
 	var parent_path: String = params.get("parent_path", "")
 	var node_name: String = params.get("name", "NavigationRegion")
@@ -42,7 +33,7 @@ func setup_navigation_region(params: Dictionary) -> Dictionary:
 	if root == null:
 		return {"error": "No scene open", "code": "NO_SCENE"}
 
-	var parent = _find_node(parent_path) if parent_path != "" else root
+	var parent = NodeFinder.find(_editor, parent_path) if parent_path != "" else root
 	var is_3d = parent is Node3D
 
 	var region: Node
@@ -72,7 +63,7 @@ func bake_navigation_mesh(params: Dictionary) -> Dictionary:
 	if node_path == "":
 		return {"error": "node_path is required", "code": "MISSING_PARAM"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null:
 		return {"error": "Node not found", "code": "NODE_NOT_FOUND"}
 
@@ -97,7 +88,7 @@ func setup_navigation_agent(params: Dictionary) -> Dictionary:
 	if root == null:
 		return {"error": "No scene open", "code": "NO_SCENE"}
 
-	var parent = _find_node(parent_path) if parent_path != "" else root
+	var parent = NodeFinder.find(_editor, parent_path) if parent_path != "" else root
 	var is_3d = parent is Node3D
 
 	var agent: Node
@@ -133,7 +124,7 @@ func set_navigation_layers(params: Dictionary) -> Dictionary:
 	if node_path == "":
 		return {"error": "node_path is required", "code": "MISSING_PARAM"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null:
 		return {"error": "Node not found", "code": "NODE_NOT_FOUND"}
 
@@ -153,7 +144,7 @@ func get_navigation_info(params: Dictionary) -> Dictionary:
 	if root == null:
 		return {"error": "No scene open", "code": "NO_SCENE"}
 
-	var start_node = _find_node(node_path) if node_path != "" else root
+	var start_node = NodeFinder.find(_editor, node_path) if node_path != "" else root
 	var audit: Array = []
 	_audit_navigation(start_node, audit)
 	return {"audit": audit, "count": audit.size()}

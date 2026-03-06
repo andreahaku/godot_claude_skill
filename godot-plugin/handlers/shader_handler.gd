@@ -24,15 +24,6 @@ func get_commands() -> Dictionary:
 	}
 
 
-func _find_node(path: String) -> Node:
-	var root = _editor.get_edited_scene_root()
-	if root == null:
-		return null
-	if path == "" or path == root.name:
-		return root
-	return root.get_node_or_null(path)
-
-
 func create_shader(params: Dictionary) -> Dictionary:
 	var path: String = params.get("path", "")
 	var shader_type: String = params.get("type", "spatial")
@@ -160,7 +151,7 @@ func assign_shader_material(params: Dictionary) -> Dictionary:
 	if not shader_path.begins_with("res://"):
 		shader_path = "res://" + shader_path
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null:
 		return {"error": "Node not found: %s" % node_path, "code": "NODE_NOT_FOUND"}
 
@@ -189,7 +180,7 @@ func set_shader_param(params: Dictionary) -> Dictionary:
 	if node_path == "" or param_name == "":
 		return {"error": "node_path and name are required", "code": "MISSING_PARAM"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null:
 		return {"error": "Node not found", "code": "NODE_NOT_FOUND"}
 
@@ -212,7 +203,7 @@ func get_shader_params(params: Dictionary) -> Dictionary:
 	if node_path == "":
 		return {"error": "node_path is required", "code": "MISSING_PARAM"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null:
 		return {"error": "Node not found", "code": "NODE_NOT_FOUND"}
 

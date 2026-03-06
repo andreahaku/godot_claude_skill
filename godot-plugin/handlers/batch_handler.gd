@@ -26,15 +26,6 @@ func get_commands() -> Dictionary:
 	}
 
 
-func _find_node(path: String) -> Node:
-	var root = _editor.get_edited_scene_root()
-	if root == null:
-		return null
-	if path == "" or path == root.name:
-		return root
-	return root.get_node_or_null(path)
-
-
 func find_nodes_by_type(params: Dictionary) -> Dictionary:
 	var type_name: String = params.get("type", "")
 	var search_path: String = params.get("search_path", "")
@@ -46,7 +37,7 @@ func find_nodes_by_type(params: Dictionary) -> Dictionary:
 	if root == null:
 		return {"error": "No scene open", "code": "NO_SCENE"}
 
-	var start = _find_node(search_path) if search_path != "" else root
+	var start = NodeFinder.find(_editor, search_path) if search_path != "" else root
 	var found: Array = []
 	_find_by_type(start, type_name, found, root)
 	return {"nodes": found, "count": found.size()}
@@ -58,7 +49,7 @@ func find_signal_connections(params: Dictionary) -> Dictionary:
 	if root == null:
 		return {"error": "No scene open", "code": "NO_SCENE"}
 
-	var start = _find_node(node_path) if node_path != "" else root
+	var start = NodeFinder.find(_editor, node_path) if node_path != "" else root
 	var connections: Array = []
 	_audit_signals(start, connections, root)
 	return {"connections": connections, "count": connections.size()}

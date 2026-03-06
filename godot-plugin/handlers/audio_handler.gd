@@ -26,15 +26,6 @@ func get_commands() -> Dictionary:
 	}
 
 
-func _find_node(path: String) -> Node:
-	var root = _editor.get_edited_scene_root()
-	if root == null:
-		return null
-	if path == "" or path == root.name:
-		return root
-	return root.get_node_or_null(path)
-
-
 func get_audio_bus_layout(params: Dictionary) -> Dictionary:
 	var buses: Array = []
 	for i in range(AudioServer.bus_count):
@@ -158,7 +149,7 @@ func add_audio_player(params: Dictionary) -> Dictionary:
 	if root == null:
 		return {"error": "No scene open", "code": "NO_SCENE"}
 
-	var parent = _find_node(parent_path) if parent_path != "" else root
+	var parent = NodeFinder.find(_editor, parent_path) if parent_path != "" else root
 
 	var player: Node
 	if is_3d:
@@ -198,7 +189,7 @@ func get_audio_info(params: Dictionary) -> Dictionary:
 	if root == null:
 		return {"error": "No scene open", "code": "NO_SCENE"}
 
-	var start = _find_node(node_path) if node_path != "" else root
+	var start = NodeFinder.find(_editor, node_path) if node_path != "" else root
 	var players: Array = []
 	_find_audio_players(start, players)
 

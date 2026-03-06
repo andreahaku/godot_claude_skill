@@ -26,15 +26,6 @@ func get_commands() -> Dictionary:
 	}
 
 
-func _find_node(path: String) -> Node:
-	var root = _editor.get_edited_scene_root()
-	if root == null:
-		return null
-	if path == "" or path == root.name:
-		return root
-	return root.get_node_or_null(path)
-
-
 func add_mesh_instance(params: Dictionary) -> Dictionary:
 	var parent_path: String = params.get("parent_path", "")
 	var mesh_type: String = params.get("mesh_type", "box")
@@ -47,7 +38,7 @@ func add_mesh_instance(params: Dictionary) -> Dictionary:
 	if root == null:
 		return {"error": "No scene is currently open", "code": "NO_SCENE"}
 
-	var parent = _find_node(parent_path) if parent_path != "" else root
+	var parent = NodeFinder.find(_editor, parent_path) if parent_path != "" else root
 	if parent == null:
 		return {"error": "Parent not found: %s" % parent_path, "code": "NODE_NOT_FOUND"}
 
@@ -117,7 +108,7 @@ func setup_lighting(params: Dictionary) -> Dictionary:
 	if root == null:
 		return {"error": "No scene open", "code": "NO_SCENE"}
 
-	var parent = _find_node(parent_path) if parent_path != "" else root
+	var parent = NodeFinder.find(_editor, parent_path) if parent_path != "" else root
 	if parent == null:
 		return {"error": "Parent not found", "code": "NODE_NOT_FOUND"}
 
@@ -186,7 +177,7 @@ func set_material_3d(params: Dictionary) -> Dictionary:
 	if node_path == "":
 		return {"error": "node_path is required", "code": "MISSING_PARAM"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null:
 		return {"error": "Node not found: %s" % node_path, "code": "NODE_NOT_FOUND"}
 	if not node is MeshInstance3D:
@@ -221,7 +212,7 @@ func setup_environment(params: Dictionary) -> Dictionary:
 	if root == null:
 		return {"error": "No scene open", "code": "NO_SCENE"}
 
-	var parent = _find_node(parent_path) if parent_path != "" else root
+	var parent = NodeFinder.find(_editor, parent_path) if parent_path != "" else root
 
 	var env_node = WorldEnvironment.new()
 	env_node.name = "WorldEnvironment"
@@ -277,7 +268,7 @@ func setup_camera_3d(params: Dictionary) -> Dictionary:
 	if root == null:
 		return {"error": "No scene open", "code": "NO_SCENE"}
 
-	var parent = _find_node(parent_path) if parent_path != "" else root
+	var parent = NodeFinder.find(_editor, parent_path) if parent_path != "" else root
 
 	var camera = Camera3D.new()
 	camera.name = node_name
@@ -312,7 +303,7 @@ func add_gridmap(params: Dictionary) -> Dictionary:
 	if root == null:
 		return {"error": "No scene open", "code": "NO_SCENE"}
 
-	var parent = _find_node(parent_path) if parent_path != "" else root
+	var parent = NodeFinder.find(_editor, parent_path) if parent_path != "" else root
 
 	var gridmap = GridMap.new()
 	gridmap.name = node_name

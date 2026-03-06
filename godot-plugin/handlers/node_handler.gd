@@ -32,30 +32,17 @@ func get_commands() -> Dictionary:
 	}
 
 
-func _get_scene_root() -> Node:
-	return _editor.get_edited_scene_root()
-
-
-func _find_node(path: String) -> Node:
-	var root = _get_scene_root()
-	if root == null:
-		return null
-	if path == "" or path == "." or path == root.name:
-		return root
-	return root.get_node_or_null(path)
-
-
 func add_node(params: Dictionary) -> Dictionary:
 	var parent_path: String = params.get("parent_path", "")
 	var node_type: String = params.get("node_type", "Node")
 	var node_name: String = params.get("node_name", "")
 	var properties: Dictionary = params.get("properties", {})
 
-	var root = _get_scene_root()
+	var root = NodeFinder.get_root(_editor)
 	if root == null:
 		return {"error": "No scene is currently open", "code": "NO_SCENE"}
 
-	var parent = _find_node(parent_path) if parent_path != "" else root
+	var parent = NodeFinder.find(_editor, parent_path) if parent_path != "" else root
 	if parent == null:
 		return {"error": "Parent node not found: %s" % parent_path, "code": "NODE_NOT_FOUND"}
 
@@ -98,11 +85,11 @@ func delete_node(params: Dictionary) -> Dictionary:
 	if node_path == "":
 		return {"error": "node_path parameter is required", "code": "MISSING_PARAM"}
 
-	var root = _get_scene_root()
+	var root = NodeFinder.get_root(_editor)
 	if root == null:
 		return {"error": "No scene is currently open", "code": "NO_SCENE"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null:
 		return {"error": "Node not found: %s" % node_path, "code": "NODE_NOT_FOUND"}
 
@@ -129,7 +116,7 @@ func rename_node(params: Dictionary) -> Dictionary:
 	if node_path == "" or new_name == "":
 		return {"error": "node_path and new_name are required", "code": "MISSING_PARAM"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null:
 		return {"error": "Node not found: %s" % node_path, "code": "NODE_NOT_FOUND"}
 
@@ -149,11 +136,11 @@ func duplicate_node(params: Dictionary) -> Dictionary:
 	if node_path == "":
 		return {"error": "node_path parameter is required", "code": "MISSING_PARAM"}
 
-	var root = _get_scene_root()
+	var root = NodeFinder.get_root(_editor)
 	if root == null:
 		return {"error": "No scene is currently open", "code": "NO_SCENE"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null:
 		return {"error": "Node not found: %s" % node_path, "code": "NODE_NOT_FOUND"}
 
@@ -181,15 +168,15 @@ func move_node(params: Dictionary) -> Dictionary:
 	if node_path == "" or new_parent_path == "":
 		return {"error": "node_path and new_parent_path are required", "code": "MISSING_PARAM"}
 
-	var root = _get_scene_root()
+	var root = NodeFinder.get_root(_editor)
 	if root == null:
 		return {"error": "No scene is currently open", "code": "NO_SCENE"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null:
 		return {"error": "Node not found: %s" % node_path, "code": "NODE_NOT_FOUND"}
 
-	var new_parent = _find_node(new_parent_path)
+	var new_parent = NodeFinder.find(_editor, new_parent_path)
 	if new_parent == null:
 		return {"error": "New parent not found: %s" % new_parent_path, "code": "NODE_NOT_FOUND"}
 
@@ -216,7 +203,7 @@ func update_property(params: Dictionary) -> Dictionary:
 	if node_path == "" or property == "":
 		return {"error": "node_path and property are required", "code": "MISSING_PARAM"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null:
 		return {"error": "Node not found: %s" % node_path, "code": "NODE_NOT_FOUND"}
 
@@ -242,7 +229,7 @@ func get_node_properties(params: Dictionary) -> Dictionary:
 	if node_path == "":
 		return {"error": "node_path parameter is required", "code": "MISSING_PARAM"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null:
 		return {"error": "Node not found: %s" % node_path, "code": "NODE_NOT_FOUND"}
 
@@ -276,7 +263,7 @@ func add_resource(params: Dictionary) -> Dictionary:
 	if node_path == "" or property == "" or resource_type == "":
 		return {"error": "node_path, property, and resource_type are required", "code": "MISSING_PARAM"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null:
 		return {"error": "Node not found: %s" % node_path, "code": "NODE_NOT_FOUND"}
 
@@ -307,7 +294,7 @@ func set_anchor_preset(params: Dictionary) -> Dictionary:
 	if node_path == "" or preset < 0:
 		return {"error": "node_path and preset are required", "code": "MISSING_PARAM"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null:
 		return {"error": "Node not found: %s" % node_path, "code": "NODE_NOT_FOUND"}
 	if not node is Control:
@@ -343,11 +330,11 @@ func connect_signal_cmd(params: Dictionary) -> Dictionary:
 	if source_path == "" or signal_name == "" or target_path == "" or method_name == "":
 		return {"error": "source_path, signal_name, target_path, and method_name are required", "code": "MISSING_PARAM"}
 
-	var source = _find_node(source_path)
+	var source = NodeFinder.find(_editor, source_path)
 	if source == null:
 		return {"error": "Source node not found: %s" % source_path, "code": "NODE_NOT_FOUND"}
 
-	var target = _find_node(target_path)
+	var target = NodeFinder.find(_editor, target_path)
 	if target == null:
 		return {"error": "Target node not found: %s" % target_path, "code": "NODE_NOT_FOUND"}
 
@@ -374,11 +361,11 @@ func disconnect_signal_cmd(params: Dictionary) -> Dictionary:
 	if source_path == "" or signal_name == "" or target_path == "" or method_name == "":
 		return {"error": "source_path, signal_name, target_path, and method_name are required", "code": "MISSING_PARAM"}
 
-	var source = _find_node(source_path)
+	var source = NodeFinder.find(_editor, source_path)
 	if source == null:
 		return {"error": "Source node not found: %s" % source_path, "code": "NODE_NOT_FOUND"}
 
-	var target = _find_node(target_path)
+	var target = NodeFinder.find(_editor, target_path)
 	if target == null:
 		return {"error": "Target node not found: %s" % target_path, "code": "NODE_NOT_FOUND"}
 

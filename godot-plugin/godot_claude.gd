@@ -157,7 +157,8 @@ func _on_command(id: String, command: String, params: Dictionary) -> void:
 
 
 func _list_commands(params: Dictionary) -> Dictionary:
-	return {"commands": _router.get_command_list(), "count": _router.get_command_list().size()}
+	var cmds = _router.get_command_list()
+	return {"commands": cmds, "count": cmds.size()}
 
 
 func _get_version(params: Dictionary) -> Dictionary:

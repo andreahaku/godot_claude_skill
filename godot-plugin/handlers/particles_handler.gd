@@ -25,15 +25,6 @@ func get_commands() -> Dictionary:
 	}
 
 
-func _find_node(path: String) -> Node:
-	var root = _editor.get_edited_scene_root()
-	if root == null:
-		return null
-	if path == "" or path == root.name:
-		return root
-	return root.get_node_or_null(path)
-
-
 func create_particles(params: Dictionary) -> Dictionary:
 	var parent_path: String = params.get("parent_path", "")
 	var is_3d: bool = params.get("is_3d", true)
@@ -45,7 +36,7 @@ func create_particles(params: Dictionary) -> Dictionary:
 	if root == null:
 		return {"error": "No scene open", "code": "NO_SCENE"}
 
-	var parent = _find_node(parent_path) if parent_path != "" else root
+	var parent = NodeFinder.find(_editor, parent_path) if parent_path != "" else root
 
 	var particles: Node
 	if is_3d:
@@ -85,7 +76,7 @@ func set_particle_material(params: Dictionary) -> Dictionary:
 	if node_path == "":
 		return {"error": "node_path is required", "code": "MISSING_PARAM"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null:
 		return {"error": "Node not found", "code": "NODE_NOT_FOUND"}
 
@@ -124,7 +115,7 @@ func set_particle_color_gradient(params: Dictionary) -> Dictionary:
 	if node_path == "" or stops.is_empty():
 		return {"error": "node_path and stops are required", "code": "MISSING_PARAM"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null:
 		return {"error": "Node not found", "code": "NODE_NOT_FOUND"}
 
@@ -162,7 +153,7 @@ func apply_particle_preset(params: Dictionary) -> Dictionary:
 	if node_path == "" or preset == "":
 		return {"error": "node_path and preset are required", "code": "MISSING_PARAM"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null:
 		return {"error": "Node not found", "code": "NODE_NOT_FOUND"}
 
@@ -239,7 +230,7 @@ func get_particle_info(params: Dictionary) -> Dictionary:
 	if node_path == "":
 		return {"error": "node_path is required", "code": "MISSING_PARAM"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null:
 		return {"error": "Node not found", "code": "NODE_NOT_FOUND"}
 

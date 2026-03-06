@@ -30,17 +30,8 @@ func get_commands() -> Dictionary:
 	}
 
 
-func _find_node(path: String) -> Node:
-	var root = _editor.get_edited_scene_root()
-	if root == null:
-		return null
-	if path == "" or path == root.name:
-		return root
-	return root.get_node_or_null(path)
-
-
 func _get_anim_tree(node_path: String) -> AnimationTree:
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node is AnimationTree:
 		return node
 	return null
@@ -55,7 +46,7 @@ func create_animation_tree(params: Dictionary) -> Dictionary:
 	if root == null:
 		return {"error": "No scene is currently open", "code": "NO_SCENE"}
 
-	var parent = _find_node(parent_path) if parent_path != "" else root
+	var parent = NodeFinder.find(_editor, parent_path) if parent_path != "" else root
 	if parent == null:
 		return {"error": "Parent not found: %s" % parent_path, "code": "NODE_NOT_FOUND"}
 

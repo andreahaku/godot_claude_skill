@@ -26,15 +26,6 @@ func get_commands() -> Dictionary:
 	}
 
 
-func _find_node(path: String) -> Node:
-	var root = _editor.get_edited_scene_root()
-	if root == null:
-		return null
-	if path == "" or path == root.name:
-		return root
-	return root.get_node_or_null(path)
-
-
 func create_theme(params: Dictionary) -> Dictionary:
 	var path: String = params.get("path", "")
 	if path == "":
@@ -62,7 +53,7 @@ func set_theme_color(params: Dictionary) -> Dictionary:
 	if node_path == "" or color_name == "" or color_value == "":
 		return {"error": "node_path, name, and color are required", "code": "MISSING_PARAM"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null or not node is Control:
 		return {"error": "Control node not found: %s" % node_path, "code": "NODE_NOT_FOUND"}
 
@@ -82,7 +73,7 @@ func set_theme_constant(params: Dictionary) -> Dictionary:
 	if node_path == "" or const_name == "":
 		return {"error": "node_path and name are required", "code": "MISSING_PARAM"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null or not node is Control:
 		return {"error": "Control node not found", "code": "NODE_NOT_FOUND"}
 
@@ -99,7 +90,7 @@ func set_theme_font_size(params: Dictionary) -> Dictionary:
 	if node_path == "":
 		return {"error": "node_path is required", "code": "MISSING_PARAM"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null or not node is Control:
 		return {"error": "Control node not found", "code": "NODE_NOT_FOUND"}
 
@@ -120,7 +111,7 @@ func set_theme_stylebox(params: Dictionary) -> Dictionary:
 	if node_path == "" or style_name == "":
 		return {"error": "node_path and name are required", "code": "MISSING_PARAM"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null or not node is Control:
 		return {"error": "Control node not found", "code": "NODE_NOT_FOUND"}
 
@@ -156,7 +147,7 @@ func get_theme_info(params: Dictionary) -> Dictionary:
 	if node_path == "":
 		return {"error": "node_path is required", "code": "MISSING_PARAM"}
 
-	var node = _find_node(node_path)
+	var node = NodeFinder.find(_editor, node_path)
 	if node == null or not node is Control:
 		return {"error": "Control node not found", "code": "NODE_NOT_FOUND"}
 
