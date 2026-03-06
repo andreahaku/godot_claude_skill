@@ -11,31 +11,7 @@ var _ws: GodotClaudeWS
 var _router: CommandRouter
 var _undo: UndoHelper
 
-# Handlers
-var _project_handler: ProjectHandler
-var _scene_handler: SceneHandler
-var _node_handler: NodeHandler
-var _script_handler: ScriptHandler
-var _editor_handler: EditorHandler
-var _input_handler: InputHandler
-var _runtime_handler: RuntimeHandler
-var _animation_handler: AnimationHandler
-var _animation_tree_handler: AnimationTreeHandler
-var _tilemap_handler: TileMapHandler
-var _scene_3d_handler: Scene3DHandler
-var _physics_handler: PhysicsHandler
-var _particles_handler: ParticlesHandler
-var _navigation_handler: NavigationHandler
-var _audio_handler: AudioHandler
-var _theme_handler: ThemeHandler
-var _shader_handler: ShaderHandler
-var _resource_handler: ResourceHandler
-var _batch_handler: BatchHandler
-var _testing_handler: TestingHandler
-var _analysis_handler: AnalysisHandler
-var _profiling_handler: ProfilingHandler
-var _asset_handler: AssetHandler
-var _export_handler: ExportHandler
+var _handlers: Array = []
 
 
 func _enter_tree() -> void:
@@ -54,81 +30,43 @@ func _enter_tree() -> void:
 
 	# Initialize all handlers and register commands
 	var ei = get_editor_interface()
+	var handler_configs: Array = [
+		# [ClassName, args...]  — "ei" = EditorInterface, "undo" = UndoHelper, "plugin" = self
+		[ProjectHandler, [ei]],
+		[SceneHandler, [ei, _undo]],
+		[NodeHandler, [ei, _undo]],
+		[ScriptHandler, [ei, _undo]],
+		[EditorHandler, [ei, self]],
+		[InputHandler, [ei]],
+		[RuntimeHandler, [ei]],
+		[AnimationHandler, [ei, _undo]],
+		[AnimationTreeHandler, [ei, _undo]],
+		[TileMapHandler, [ei, _undo]],
+		[Scene3DHandler, [ei, _undo]],
+		[PhysicsHandler, [ei, _undo]],
+		[ParticlesHandler, [ei, _undo]],
+		[NavigationHandler, [ei, _undo]],
+		[AudioHandler, [ei, _undo]],
+		[ThemeHandler, [ei, _undo]],
+		[ShaderHandler, [ei, _undo]],
+		[ResourceHandler, [ei]],
+		[BatchHandler, [ei, _undo]],
+		[TestingHandler, [ei]],
+		[AnalysisHandler, [ei]],
+		[ProfilingHandler, [ei]],
+		[AssetHandler, [ei, _undo]],
+		[ExportHandler, [ei]],
+	]
 
-	_project_handler = ProjectHandler.new(ei)
-	_router.register_all(_project_handler.get_commands())
-
-	_scene_handler = SceneHandler.new(ei, _undo)
-	_router.register_all(_scene_handler.get_commands())
-
-	_node_handler = NodeHandler.new(ei, _undo)
-	_router.register_all(_node_handler.get_commands())
-
-	_script_handler = ScriptHandler.new(ei, _undo)
-	_router.register_all(_script_handler.get_commands())
-
-	_editor_handler = EditorHandler.new(ei, self)
-	_router.register_all(_editor_handler.get_commands())
-
-	_input_handler = InputHandler.new(ei)
-	_router.register_all(_input_handler.get_commands())
-
-	_runtime_handler = RuntimeHandler.new(ei)
-	_router.register_all(_runtime_handler.get_commands())
-
-	_animation_handler = AnimationHandler.new(ei, _undo)
-	_router.register_all(_animation_handler.get_commands())
-
-	_animation_tree_handler = AnimationTreeHandler.new(ei, _undo)
-	_router.register_all(_animation_tree_handler.get_commands())
-
-	_tilemap_handler = TileMapHandler.new(ei, _undo)
-	_router.register_all(_tilemap_handler.get_commands())
-
-	_scene_3d_handler = Scene3DHandler.new(ei, _undo)
-	_router.register_all(_scene_3d_handler.get_commands())
-
-	_physics_handler = PhysicsHandler.new(ei, _undo)
-	_router.register_all(_physics_handler.get_commands())
-
-	_particles_handler = ParticlesHandler.new(ei, _undo)
-	_router.register_all(_particles_handler.get_commands())
-
-	_navigation_handler = NavigationHandler.new(ei, _undo)
-	_router.register_all(_navigation_handler.get_commands())
-
-	_audio_handler = AudioHandler.new(ei, _undo)
-	_router.register_all(_audio_handler.get_commands())
-
-	_theme_handler = ThemeHandler.new(ei, _undo)
-	_router.register_all(_theme_handler.get_commands())
-
-	_shader_handler = ShaderHandler.new(ei, _undo)
-	_router.register_all(_shader_handler.get_commands())
-
-	_resource_handler = ResourceHandler.new(ei)
-	_router.register_all(_resource_handler.get_commands())
-
-	_batch_handler = BatchHandler.new(ei, _undo)
-	_router.register_all(_batch_handler.get_commands())
-
-	_testing_handler = TestingHandler.new(ei)
-	_router.register_all(_testing_handler.get_commands())
-
-	_analysis_handler = AnalysisHandler.new(ei)
-	_router.register_all(_analysis_handler.get_commands())
-
-	_profiling_handler = ProfilingHandler.new(ei)
-	_router.register_all(_profiling_handler.get_commands())
-
-	_asset_handler = AssetHandler.new(ei, _undo)
-	_router.register_all(_asset_handler.get_commands())
-
-	_export_handler = ExportHandler.new(ei)
-	_router.register_all(_export_handler.get_commands())
+	for config in handler_configs:
+		var handler = _create_handler(config[0], config[1])
+		if handler:
+			_handlers.append(handler)
+			_router.register_all(handler.get_commands(), handler)
 
 	# Register meta commands
 	_router.register("list_commands", _list_commands)
+	_router.register("get_command_info", _get_command_info)
 	_router.register("get_version", _get_version)
 	_router.register("batch_execute", _router.batch_execute)
 
@@ -163,7 +101,35 @@ func _on_command(id: String, command: String, params: Dictionary) -> void:
 
 func _list_commands(params: Dictionary) -> Dictionary:
 	var cmds = _router.get_command_list()
-	return {"commands": cmds, "count": cmds.size()}
+	var categories = _router.get_command_categories()
+
+	# Group commands by handler category
+	var grouped: Dictionary = {}
+	for cmd in cmds:
+		var cat: String = categories.get(cmd, "meta")
+		if not grouped.has(cat):
+			grouped[cat] = []
+		grouped[cat].append(cmd)
+
+	return {"commands": cmds, "count": cmds.size(), "categories": grouped}
+
+
+func _get_command_info(params: Dictionary) -> Dictionary:
+	var command: String = params.get("command", "")
+	if command == "":
+		return {"error": "command parameter is required", "code": "MISSING_PARAM"}
+
+	var cmds = _router.get_command_list()
+	if command not in cmds:
+		# Fuzzy match — find similar command names
+		var suggestions: Array = []
+		for cmd in cmds:
+			if cmd.contains(command) or command.contains(cmd):
+				suggestions.append(cmd)
+		return {"error": "Unknown command: %s" % command, "code": "UNKNOWN_COMMAND", "suggestions": suggestions.slice(0, 5)}
+
+	var categories = _router.get_command_categories()
+	return {"command": command, "category": categories.get(command, "meta"), "exists": true}
 
 
 func _get_version(params: Dictionary) -> Dictionary:
@@ -172,3 +138,14 @@ func _get_version(params: Dictionary) -> Dictionary:
 		"godot_version": "%s.%s.%s" % [Engine.get_version_info().major, Engine.get_version_info().minor, Engine.get_version_info().patch],
 		"commands": _router.get_command_list().size(),
 	}
+
+
+func _create_handler(handler_class, args: Array):
+	match args.size():
+		1:
+			return handler_class.new(args[0])
+		2:
+			return handler_class.new(args[0], args[1])
+		_:
+			push_error("[GodotClaude] Unsupported handler constructor arity: %d" % args.size())
+			return null

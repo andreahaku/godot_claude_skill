@@ -11,6 +11,12 @@
  *
  * Compact output (only success/fail, no full JSON):
  *   bun ws_send.ts --compact add_node '{"node_name":"Foo","node_type":"Node2D"}'
+ *
+ * Verbose mode (show raw WebSocket messages):
+ *   bun ws_send.ts --verbose add_node '{"node_name":"Foo","node_type":"Node2D"}'
+ *
+ * Listen mode (keep connection open, read commands from stdin interactively):
+ *   bun ws_send.ts --listen
  */
 
 const WS_URL = process.env.GODOT_WS_URL || "ws://127.0.0.1:9080";
@@ -29,6 +35,14 @@ interface ResponseMsg {
   error?: string;
 }
 
+let verbose = false;
+
+function log_verbose(direction: ">>>" | "<<<", data: string) {
+  if (verbose) {
+    console.error(`${direction} ${data}`);
+  }
+}
+
 async function sendSingle(command: string, params: Record<string, unknown>, compact: boolean) {
   const id = crypto.randomUUID();
   const message = JSON.stringify({ id, command, params });
@@ -43,11 +57,13 @@ async function sendSingle(command: string, params: Record<string, unknown>, comp
     }, TIMEOUT_MS);
 
     ws.addEventListener("open", () => {
+      log_verbose(">>>", message);
       ws.send(message);
     });
 
     ws.addEventListener("message", (event) => {
       clearTimeout(timeout);
+      log_verbose("<<<", event.data as string);
       try {
         const data = JSON.parse(event.data as string) as ResponseMsg;
         if (data.id === id) {
@@ -131,11 +147,14 @@ async function sendBatch(compact: boolean) {
       if (sent >= commands.length) return;
       const cmd = commands[sent];
       pending.set(cmd.id, cmd);
-      ws.send(JSON.stringify(cmd));
+      const msg = JSON.stringify(cmd);
+      log_verbose(">>>", msg);
+      ws.send(msg);
       sent++;
     }
 
     ws.addEventListener("message", (event) => {
+      log_verbose("<<<", event.data as string);
       try {
         const data = JSON.parse(event.data as string) as ResponseMsg;
         const cmd = pending.get(data.id);
@@ -186,6 +205,82 @@ async function sendBatch(compact: boolean) {
   });
 }
 
+async function listenMode() {
+  const ws = new WebSocket(WS_URL);
+  const pending = new Map<string, string>();
+
+  ws.addEventListener("open", () => {
+    console.error(`Connected to ${WS_URL} — type commands as: command_name {"param":"value"}`);
+    console.error("Press Ctrl+C to exit.\n");
+    readLines();
+  });
+
+  ws.addEventListener("message", (event) => {
+    log_verbose("<<<", event.data as string);
+    try {
+      const data = JSON.parse(event.data as string) as ResponseMsg;
+      const cmdName = pending.get(data.id) || "?";
+      pending.delete(data.id);
+      if (data.success) {
+        console.log(JSON.stringify(data.result, null, 2));
+      } else {
+        console.error(`FAIL [${cmdName}]: ${data.error}`);
+      }
+    } catch {
+      console.log(event.data);
+    }
+    process.stdout.write("> ");
+  });
+
+  ws.addEventListener("error", () => {
+    console.error("WebSocket connection failed. Is Godot running?");
+    process.exit(1);
+  });
+
+  ws.addEventListener("close", () => {
+    console.error("\nConnection closed.");
+    process.exit(0);
+  });
+
+  async function readLines() {
+    process.stdout.write("> ");
+    const reader = Bun.stdin.stream().getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        const spaceIdx = trimmed.indexOf(" ");
+        const command = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
+        let params: Record<string, unknown> = {};
+        if (spaceIdx !== -1) {
+          try {
+            params = JSON.parse(trimmed.slice(spaceIdx + 1));
+          } catch {
+            console.error("Invalid JSON params");
+            process.stdout.write("> ");
+            continue;
+          }
+        }
+
+        const id = crypto.randomUUID();
+        pending.set(id, command);
+        const msg = JSON.stringify({ id, command, params });
+        log_verbose(">>>", msg);
+        ws.send(msg);
+      }
+    }
+  }
+}
+
 async function main() {
   const args = process.argv.slice(2);
 
@@ -193,14 +288,23 @@ async function main() {
     console.error(`Usage:
   bun ws_send.ts <command> [json_params]           Single command
   bun ws_send.ts --compact <command> [json_params]  Compact output (OK/FAIL)
+  bun ws_send.ts --verbose <command> [json_params]  Show raw WebSocket messages
+  bun ws_send.ts --listen                           Interactive persistent connection
   echo '{"command":"x","params":{}}' | bun ws_send.ts --batch    Batch from stdin
   cat commands.jsonl | bun ws_send.ts --batch --compact          Batch compact`);
     process.exit(1);
   }
 
+  verbose = args.includes("--verbose");
   const compact = args.includes("--compact");
   const batch = args.includes("--batch");
+  const listen = args.includes("--listen");
   const filteredArgs = args.filter((a) => !a.startsWith("--"));
+
+  if (listen) {
+    await listenMode();
+    return;
+  }
 
   if (batch) {
     await sendBatch(compact);

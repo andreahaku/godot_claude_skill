@@ -5,6 +5,24 @@ class_name TypeParser
 ## Supports: Vector2, Vector3, Color, Rect2, Transform2D, Transform3D, Basis,
 ## AABB, Plane, Quaternion, NodePath, bool, int, float, arrays, dictionaries
 
+## Prefix-to-parser dispatch table — O(1) lookup instead of linear if-chain
+static var _type_parsers: Dictionary = {
+	"Vector2": _try_parse_vector2,
+	"Vector2i": _try_parse_vector2i,
+	"Vector3": _try_parse_vector3,
+	"Vector3i": _try_parse_vector3i,
+	"Vector4": _try_parse_vector4,
+	"Color": _try_parse_color,
+	"Rect2": _try_parse_rect2,
+	"AABB": _try_parse_aabb,
+	"Plane": _try_parse_plane,
+	"Quaternion": _try_parse_quaternion,
+	"Basis": _try_parse_basis,
+	"Transform2D": _try_parse_transform2d,
+	"Transform3D": _try_parse_transform3d,
+	"NodePath": _try_parse_nodepath,
+}
+
 static func parse_value(value) -> Variant:
 	if value == null:
 		return null
@@ -37,81 +55,21 @@ static func parse_value(value) -> Variant:
 			return Color.html(s)
 		return value  # Return as string if invalid hex
 
-	# Vector2
-	var v2 = _try_parse_vector2(s)
-	if v2 != null:
-		return v2
+	# Type constructor dispatch — extract prefix before '(' and look up parser
+	var paren_idx = s.find("(")
+	if paren_idx > 0:
+		var prefix = s.substr(0, paren_idx)
+		if _type_parsers.has(prefix):
+			var result = _type_parsers[prefix].call(s)
+			if result != null:
+				return result
 
-	# Vector2i
-	var v2i = _try_parse_vector2i(s)
-	if v2i != null:
-		return v2i
-
-	# Vector3
-	var v3 = _try_parse_vector3(s)
-	if v3 != null:
-		return v3
-
-	# Vector3i
-	var v3i = _try_parse_vector3i(s)
-	if v3i != null:
-		return v3i
-
-	# Vector4
-	var v4 = _try_parse_vector4(s)
-	if v4 != null:
-		return v4
-
-	# Color(r,g,b) or Color(r,g,b,a)
-	var col = _try_parse_color(s)
-	if col != null:
-		return col
-
-	# Rect2
-	var r2 = _try_parse_rect2(s)
-	if r2 != null:
-		return r2
-
-	# AABB
-	var aabb = _try_parse_aabb(s)
-	if aabb != null:
-		return aabb
-
-	# Plane
-	var plane = _try_parse_plane(s)
-	if plane != null:
-		return plane
-
-	# Quaternion
-	var quat = _try_parse_quaternion(s)
-	if quat != null:
-		return quat
-
-	# Basis
-	var basis = _try_parse_basis(s)
-	if basis != null:
-		return basis
-
-	# Transform2D
-	var t2d = _try_parse_transform2d(s)
-	if t2d != null:
-		return t2d
-
-	# Transform3D
-	var t3d = _try_parse_transform3d(s)
-	if t3d != null:
-		return t3d
-
-	# NodePath
-	if s.begins_with("NodePath(") or s.begins_with("^"):
+	# NodePath shorthand
+	if s.begins_with("^"):
 		var path_str = s
-		if s.begins_with("NodePath("):
-			path_str = s.substr(9, s.length() - 10).strip_edges()
-			if path_str.begins_with("\"") and path_str.ends_with("\""):
-				path_str = path_str.substr(1, path_str.length() - 2)
-		elif s.begins_with("^\""):
+		if s.begins_with("^\""):
 			path_str = s.substr(2, s.length() - 3)
-		elif s.begins_with("^"):
+		else:
 			path_str = s.substr(1)
 		return NodePath(path_str)
 
@@ -152,12 +110,9 @@ static func parse_value_strict(value) -> Dictionary:
 		return {"value": result, "parsed": true}
 
 	# Check if the string looks like it was INTENDED to be a type expression but failed
-	var type_prefixes := ["Vector2(", "Vector2i(", "Vector3(", "Vector3i(", "Vector4(",
-		"Color(", "Rect2(", "AABB(", "Plane(", "Quaternion(", "Basis(",
-		"Transform2D(", "Transform3D(", "NodePath("]
-	for prefix in type_prefixes:
-		if s.begins_with(prefix):
-			return {"value": value, "parsed": false}
+	var paren_idx = s.find("(")
+	if paren_idx > 0 and _type_parsers.has(s.substr(0, paren_idx)):
+		return {"value": value, "parsed": false}
 
 	# Plain string — not a failed parse
 	return {"value": value, "parsed": true}
@@ -279,6 +234,15 @@ static func _try_parse_transform3d(s: String):
 			Vector3(args[9].strip_edges().to_float(), args[10].strip_edges().to_float(), args[11].strip_edges().to_float())
 		)
 	return null
+
+
+static func _try_parse_nodepath(s: String):
+	if not s.begins_with("NodePath(") or not s.ends_with(")"):
+		return null
+	var path_str = s.substr(9, s.length() - 10).strip_edges()
+	if path_str.begins_with("\"") and path_str.ends_with("\""):
+		path_str = path_str.substr(1, path_str.length() - 2)
+	return NodePath(path_str)
 
 
 ## Convert a Godot value to a JSON-safe representation.

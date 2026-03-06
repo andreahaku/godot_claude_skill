@@ -67,7 +67,7 @@ bun /path/to/godot_claude_skill/skill/generate_asset.ts "<prompt>" '{"output":"r
 - `environment` — Game backgrounds, atmospheric
 - `spritesheet` — Horizontal strip of animation frames, evenly spaced
 
-## Available Commands (157 total, 25 categories)
+## Available Commands (161 total, 25 categories)
 
 ### Project (7)
 - `get_project_info` - Get project metadata, file counts, autoloads
@@ -265,17 +265,20 @@ bun /path/to/godot_claude_skill/skill/generate_asset.ts "<prompt>" '{"output":"r
 - `detect_circular_dependencies` - Find circular script dependencies
 - `get_project_statistics` - File counts, LOC, scene/script totals
 
-### Profiling (2)
+### Profiling (4)
 - `get_performance_monitors` - Runtime metrics: FPS, process/physics time, render stats, memory, object counts, physics stats (requires game running)
 - `get_editor_performance` - Editor metrics: FPS, objects, resources, nodes, memory usage
+- `snapshot_performance` - Save performance snapshot to history. Params: `{"label":"after optimization"}` — returns current values + delta from previous snapshot
+- `get_performance_history` - Get recorded snapshots with trend analysis. Params: `{"last":10}` — omit `last` for all history
 
 ### Export (3)
 - `list_export_presets` - List configured export presets from export_presets.cfg
 - `export_project` - Export project. Params: `{"preset":"Windows Desktop","output_path":"/path/to/output","debug":false}` — returns the export command to run
 - `get_export_info` - Get export environment info (Godot path, templates, presets)
 
-### Meta (3)
-- `list_commands` - List all available commands
+### Meta (4)
+- `list_commands` - List all available commands grouped by handler category
+- `get_command_info` - Look up a command. Params: `{"command":"add_node"}` — returns category; suggests similar commands if not found
 - `get_version` - Get plugin and Godot version
 - `batch_execute` - Run multiple commands in one request. Params: `{"commands":[{"command":"add_node","params":{"node_name":"A","node_type":"Node2D"}},{"command":"update_property","params":{"node_path":"A","property":"position","value":"Vector2(100,100)"}}]}` — returns `{total, succeeded, failed, results}`
 

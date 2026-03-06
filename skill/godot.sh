@@ -5,6 +5,15 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WS_SEND="$SCRIPT_DIR/ws_send.ts"
 
+# Verify bun is installed
+if ! command -v bun &>/dev/null; then
+  echo "Error: bun is not installed."
+  echo ""
+  echo "Install it with:  curl -fsSL https://bun.sh/install | bash"
+  echo "Or see:           https://bun.sh"
+  exit 1
+fi
+
 if [ -z "$1" ]; then
   echo "Usage: godot.sh <command> [json_params]"
   echo ""

@@ -7,6 +7,7 @@ extends RefCounted
 ## Supports both regular and coroutine (async) handlers.
 
 var _handlers: Dictionary = {} # command_name -> Callable
+var _categories: Dictionary = {} # command_name -> handler_class_name
 var _ws: GodotClaudeWS
 
 
@@ -14,13 +15,22 @@ func _init(ws: GodotClaudeWS):
 	_ws = ws
 
 
-func register(command_name: String, handler: Callable) -> void:
+func register(command_name: String, handler: Callable, category: String = "meta") -> void:
 	_handlers[command_name] = handler
+	_categories[command_name] = category
 
 
-func register_all(commands: Dictionary) -> void:
+func register_all(commands: Dictionary, handler_obj = null) -> void:
+	var category := "unknown"
+	if handler_obj:
+		category = handler_obj.get_class() if handler_obj is Object else str(handler_obj)
+		# RefCounted subclasses return "RefCounted" from get_class(), use script class name instead
+		if handler_obj.get_script():
+			var script_path: String = handler_obj.get_script().resource_path
+			category = script_path.get_file().get_basename()
 	for cmd in commands:
 		_handlers[cmd] = commands[cmd]
+		_categories[cmd] = category
 
 
 func handle(id: String, command: String, params: Dictionary) -> void:
@@ -136,3 +146,7 @@ func get_command_list() -> Array[String]:
 		cmds.append(cmd)
 	cmds.sort()
 	return cmds
+
+
+func get_command_categories() -> Dictionary:
+	return _categories.duplicate()

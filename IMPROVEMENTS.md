@@ -52,14 +52,14 @@ Missing commands, param consistency, documentation.
 
 Performance, DX, code quality.
 
-- [ ] **3.1** Add short-lived cache to `NodeFinder` — avoid re-resolving same path multiple times per command
-- [ ] **3.2** Optimize `TypeParser` — use match/dictionary dispatch instead of linear if-chain
-- [ ] **3.3** Refactor `godot_claude.gd` constructor — loop-based handler init with error handling per handler
-- [ ] **3.4** Add handler schema/introspection — handlers declare param names + types for auto-doc
-- [ ] **3.5** Add prerequisite check to `godot.sh` — verify bun is installed with actionable error
-- [ ] **3.6** Expand `ProfilingHandler` — add history tracking and trend analysis
-- [ ] **3.7** Add `--verbose` flag to `ws_send.ts` for debugging (show raw messages)
-- [ ] **3.8** Add connection reuse / persistent mode to `ws_send.ts` for interactive use
+- N/A **3.1** NodeFinder cache — `get_node_or_null()` is already O(1) in C++; GDScript cache adds overhead
+- [x] **3.2** Optimize TypeParser — prefix-to-parser dispatch dictionary instead of linear if-chain
+- [x] **3.3** Refactor `godot_claude.gd` constructor — data-driven loop with `_create_handler()` helper
+- [x] **3.4** Add command introspection — `get_command_info` meta command, `list_commands` now returns categories, command_router tracks handler→category mapping
+- [x] **3.5** Add prerequisite check to `godot.sh` — verify bun is installed with actionable error
+- [x] **3.6** Expand ProfilingHandler — `snapshot_performance` with delta tracking, `get_performance_history` with trend analysis
+- [x] **3.7** Add `--verbose` flag to `ws_send.ts` — logs raw `>>>` / `<<<` WebSocket messages to stderr
+- [x] **3.8** Add `--listen` persistent mode to `ws_send.ts` — interactive REPL with persistent WebSocket connection
 
 ## Status
 
@@ -67,4 +67,4 @@ Performance, DX, code quality.
 |-------|--------|-------|------|
 | Phase 1 — Robustness | **Done** | 10 | 10 |
 | Phase 2 — Completeness | **Done** | 12 | 12 |
-| Phase 3 — Polish | Not started | 8 | 0 |
+| Phase 3 — Polish | **Done** | 8 | 7 (1 N/A) |
