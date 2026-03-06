@@ -7,7 +7,7 @@ Use the shell command to send commands to the running Godot editor:
 bun /path/to/godot_claude_skill/skill/ws_send.ts <command> '<json_params>'
 ```
 
-## Available Commands (162 total, 23 categories)
+## Available Commands (149 total, 23 categories)
 
 ### Project (7)
 - `get_project_info` - Get project metadata, file counts, autoloads
