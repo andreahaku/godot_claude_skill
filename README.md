@@ -1,6 +1,6 @@
 # Godot Claude Skill
 
-A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **156 commands across 25 categories** with full undo/redo support and AI asset generation.
+A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **161 commands across 25 categories** with full undo/redo support and AI asset generation.
 
 ## Architecture
 
@@ -10,7 +10,7 @@ A comprehensive Claude Code skill for controlling the Godot game engine editor i
 │                 │   ws://127.0.0.1   │                      │
 │  skill/         │      :9080         │  godot-plugin/       │
 │  ws_send.ts     │                    │  godot_claude.gd     │
-│  generate_asset │  JSON commands     │  25 handlers          │
+│  generate_asset │  JSON commands     │  24 handlers          │
 └─────────────────┘                    └──────────────────────┘
 ```
 
@@ -65,7 +65,7 @@ addons/godot_claude_skill/
 ├── godot_claude.gd         # Main EditorPlugin entry point
 ├── ws_server.gd            # WebSocket server (TCPServer + WebSocketPeer)
 ├── command_router.gd       # Routes commands to handlers
-├── handlers/               # 23 handler files (one per category)
+├── handlers/               # 24 handler files (one per category)
 │   ├── animation_handler.gd
 │   ├── animation_tree_handler.gd
 │   ├── audio_handler.gd
@@ -83,7 +83,7 @@ addons/godot_claude_skill/
 │   ├── shader_handler.gd
 │   ├── theme_handler.gd
 │   ├── tilemap_handler.gd
-│   └── ... (analysis, export, profiling, resource, testing)
+│   └── ... (analysis, asset, export, profiling, resource, testing)
 └── utils/
     ├── node_finder.gd      # Shared node lookup utility
     ├── type_parser.gd      # Smart type parsing (Vector2, Color, etc.)
@@ -97,7 +97,7 @@ addons/godot_claude_skill/
 3. Find **GodotClaudeSkill** in the list and check **Enable**
 4. Check the **Output** panel — you should see:
    ```
-   [GodotClaude] Ready! 156 commands available on ws://127.0.0.1:9080
+   [GodotClaude] Ready! 161 commands available on ws://127.0.0.1:9080
    ```
 
 If you don't see this message, check:
@@ -118,7 +118,7 @@ mkdir -p .claude/commands
 cp /path/to/godot_claude_skill/.claude/commands/godot.md .claude/commands/godot.md
 ```
 
-This gives Claude Code the `/godot` slash command with full documentation of all 156 commands.
+This gives Claude Code the `/godot` slash command with full documentation of all 161 commands.
 
 #### 3b. Add CLAUDE.md Instructions (optional but recommended)
 
@@ -173,7 +173,7 @@ You: Add a script to the player with basic movement
 Claude: (creates GDScript, attaches it to the player node)
 ```
 
-## Features (25 Categories, 156 Commands)
+## Features (25 Categories, 161 Commands)
 
 | Category | Count | Highlights |
 |---|---|---|
@@ -191,17 +191,17 @@ Claude: (creates GDScript, attaches it to the player node)
 | **Physics** | 6 | Collision shapes, layers, raycasts, body config, collision audit |
 | **Particles** | 5 | GPU particles 2D/3D, presets (fire, smoke, rain, snow, sparks) |
 | **Navigation** | 5 | Regions, mesh baking, agents, layers, navigation audit |
-| **Audio** | 6 | Bus layout, effects (reverb, delay, compressor), audio players |
+| **Audio** | 7 | Bus layout, add/remove buses, effects (reverb, delay, etc.), audio players |
 | **Theme & UI** | 6 | Create themes, colors, constants, font sizes, styleboxes |
 | **Shader** | 6 | Create/edit GLSL, assign materials, set/get uniforms |
 | **Resource** | 3 | Read/edit/create .tres files of any type |
 | **Batch & Refactoring** | 6 | Find by type, audit signals, bulk property changes, cross-scene |
 | **Testing & QA** | 5 | Automated test scenarios, assertions, stress testing |
 | **Code Analysis** | 6 | Unused resources, signal flow, complexity, circular deps |
-| **Profiling** | 2 | FPS, memory, physics, render metrics |
+| **Profiling** | 4 | FPS, memory, render metrics, snapshot history with trend analysis |
 | **Asset Management** | 6 | Sprite textures, sprite frames from spritesheets, atlas textures, import presets, NinePatch |
 | **Export** | 3 | Presets, export commands, template info |
-| **Meta** | 3 | List commands, version info, batch execute |
+| **Meta** | 4 | List commands, command introspection, version info, batch execute |
 
 ## Key Features
 
@@ -255,14 +255,22 @@ printf '{"command":"add_node","params":{"node_name":"A","node_type":"Node2D"}}
 {"command":"add_node","params":{"node_name":"B","node_type":"Sprite2D","parent_path":"A"}}
 ' | bun skill/ws_send.ts --batch --compact
 # Output:
-# add_node: OK
-# add_node: OK
+# [1/2] add_node: OK
+# [2/2] add_node: OK
 
 # Server-side batch — single WebSocket message, multiple commands
 bun skill/ws_send.ts batch_execute '{"commands":[
   {"command":"add_node","params":{"node_name":"A","node_type":"Node2D"}},
   {"command":"update_property","params":{"node_path":"A","property":"position","value":"Vector2(100,200)"}}
 ]}'
+
+# Verbose mode — show raw WebSocket messages (useful for debugging)
+bun skill/ws_send.ts --verbose get_scene_tree
+
+# Listen mode — interactive persistent connection (REPL)
+bun skill/ws_send.ts --listen
+# > get_scene_tree
+# > add_node {"node_name":"Foo","node_type":"Node2D"}
 ```
 
 ### Runtime Analysis
@@ -455,17 +463,18 @@ Error responses:
 godot_claude_skill/
 ├── .claude/
 │   └── commands/
-│       └── godot.md           # Claude Code skill definition (156 commands documented)
+│       └── godot.md           # Claude Code skill definition (161 commands documented)
 ├── godot-plugin/              # Source files for the Godot EditorPlugin
 │   ├── plugin.cfg
 │   ├── godot_claude.gd        # Main plugin entry point
 │   ├── ws_server.gd           # WebSocket server
-│   ├── command_router.gd      # Command routing
-│   ├── handlers/              # 23 handler files (one per category)
-│   └── utils/                 # Shared utilities
+│   ├── command_router.gd      # Command routing with category tracking
+│   ├── handlers/              # 24 handler files (one per category)
+│   └── utils/                 # Shared utilities (NodeFinder, TypeParser, UndoHelper)
 ├── skill/
-│   ├── install.sh             # Installation script
-│   ├── ws_send.ts             # Bun WebSocket client (single, batch, compact modes)
+│   ├── install.sh             # Installation script (with Godot version check)
+│   ├── godot.sh               # Shell wrapper (with bun prerequisite check)
+│   ├── ws_send.ts             # Bun WebSocket client (single, batch, compact, verbose, listen)
 │   └── generate_asset.ts      # AI asset generator (Gemini/Imagen, DALL-E)
 └── README.md
 ```
