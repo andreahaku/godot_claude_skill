@@ -1,3 +1,4 @@
+@tool
 class_name AnimationHandler
 extends RefCounted
 
@@ -113,9 +114,6 @@ func add_animation_track(params: Dictionary) -> Dictionary:
 
 	var type_map := {
 		"value": Animation.TYPE_VALUE,
-		"position_2d": Animation.TYPE_POSITION_2D,
-		"rotation_2d": Animation.TYPE_ROTATION_2D,
-		"scale_2d": Animation.TYPE_SCALE_2D,
 		"position_3d": Animation.TYPE_POSITION_3D,
 		"rotation_3d": Animation.TYPE_ROTATION_3D,
 		"scale_3d": Animation.TYPE_SCALE_3D,

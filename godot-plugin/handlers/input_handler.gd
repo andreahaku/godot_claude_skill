@@ -1,3 +1,4 @@
+@tool
 class_name InputHandler
 extends RefCounted
 
@@ -29,7 +30,6 @@ func simulate_key(params: Dictionary) -> Dictionary:
 	var ctrl: bool = params.get("ctrl", false)
 	var alt: bool = params.get("alt", false)
 	var meta: bool = params.get("meta", false)
-	var duration: float = params.get("duration", 0.0)
 
 	if key == "":
 		return {"error": "key parameter is required", "code": "MISSING_PARAM"}
@@ -48,8 +48,8 @@ func simulate_key(params: Dictionary) -> Dictionary:
 
 	Input.parse_input_event(event)
 
-	if duration > 0.0 and pressed:
-		# Schedule key release after duration
+	# If press+release is desired, send release immediately after
+	if pressed and params.get("auto_release", false):
 		var release = InputEventKey.new()
 		release.keycode = keycode
 		release.pressed = false
@@ -57,9 +57,6 @@ func simulate_key(params: Dictionary) -> Dictionary:
 		release.ctrl_pressed = ctrl
 		release.alt_pressed = alt
 		release.meta_pressed = meta
-		# Note: actual delayed release requires timer; this is immediate
-		# The game's _process loop handles duration in practice
-		await Engine.get_main_loop().create_timer(duration).timeout
 		Input.parse_input_event(release)
 
 	return {"key": key, "pressed": pressed, "keycode": keycode}
@@ -137,10 +134,6 @@ func simulate_sequence(params: Dictionary) -> Dictionary:
 	var results: Array = []
 	for step in steps:
 		var step_type: String = step.get("type", "")
-		var delay: float = step.get("delay", 0.0)
-
-		if delay > 0.0:
-			await Engine.get_main_loop().create_timer(delay).timeout
 
 		var result: Dictionary
 		match step_type:
@@ -152,10 +145,6 @@ func simulate_sequence(params: Dictionary) -> Dictionary:
 				result = simulate_mouse_move(step)
 			"action":
 				result = simulate_action(step)
-			"wait":
-				var wait_time: float = step.get("duration", 1.0)
-				await Engine.get_main_loop().create_timer(wait_time).timeout
-				result = {"waited": wait_time}
 			_:
 				result = {"error": "Unknown step type: %s" % step_type}
 

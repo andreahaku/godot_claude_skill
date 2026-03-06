@@ -45,7 +45,8 @@ func _enter_tree() -> void:
 	add_child(_ws)
 
 	# Initialize UndoRedo helper
-	_undo = UndoHelper.new(get_undo_redo())
+	_undo = UndoHelper.new()
+	_undo.setup(get_undo_redo())
 
 	# Initialize router
 	_router = CommandRouter.new(_ws)

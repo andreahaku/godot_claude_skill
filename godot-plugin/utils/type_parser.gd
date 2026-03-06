@@ -1,3 +1,4 @@
+@tool
 class_name TypeParser
 
 ## Smart type parsing - converts string representations to proper Godot types

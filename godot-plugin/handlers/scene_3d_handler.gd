@@ -1,3 +1,4 @@
+@tool
 class_name Scene3DHandler
 extends RefCounted
 

@@ -1,8 +1,10 @@
+@tool
 class_name CommandRouter
 extends RefCounted
 
 ## Routes incoming WebSocket commands to the appropriate handler.
 ## Each handler registers its supported commands with the router.
+## Supports both regular and coroutine (async) handlers.
 
 var _handlers: Dictionary = {} # command_name -> Callable
 var _ws: GodotClaudeWS
@@ -34,11 +36,11 @@ func handle(id: String, command: String, params: Dictionary) -> void:
 		)
 		return
 
-	# Call the handler
+	# Call the handler - await supports both regular and coroutine functions
 	var handler: Callable = _handlers[command]
-	var result = handler.call(params)
+	var result = await handler.call(params)
 
-	# If handler returns a Dictionary, send it as response
+	# Send response based on result type
 	if result is Dictionary:
 		if result.has("error"):
 			_ws.send_response(
@@ -50,7 +52,6 @@ func handle(id: String, command: String, params: Dictionary) -> void:
 		else:
 			_ws.send_response(peer_id, id, true, result)
 	elif result == null:
-		# Handler sent response itself or void return
 		_ws.send_response(peer_id, id, true, {})
 	else:
 		_ws.send_response(peer_id, id, true, {"value": result})
