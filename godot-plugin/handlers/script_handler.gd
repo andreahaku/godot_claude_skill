@@ -28,9 +28,11 @@ func get_commands() -> Dictionary:
 
 func list_scripts(params: Dictionary) -> Dictionary:
 	var path: String = params.get("path", "res://")
+	var max_results: int = params.get("max_results", 500)
 	var results: Array = []
-	_find_scripts(path, results)
-	return {"scripts": results, "count": results.size()}
+	_find_scripts(path, results, max_results)
+	var truncated = results.size() >= max_results
+	return {"scripts": results, "count": results.size(), "truncated": truncated}
 
 
 func read_script(params: Dictionary) -> Dictionary:
@@ -206,19 +208,21 @@ func get_open_scripts(params: Dictionary) -> Dictionary:
 	return {"scripts": open_scripts}
 
 
-func _find_scripts(path: String, results: Array) -> void:
+func _find_scripts(path: String, results: Array, max_results: int = 500) -> void:
+	if results.size() >= max_results:
+		return
 	var dir = DirAccess.open(path)
 	if dir == null:
 		return
 	dir.list_dir_begin()
 	var file_name = dir.get_next()
-	while file_name != "":
+	while file_name != "" and results.size() < max_results:
 		if file_name.begins_with("."):
 			file_name = dir.get_next()
 			continue
 		var full_path = path.path_join(file_name)
 		if dir.current_is_dir():
-			_find_scripts(full_path, results)
+			_find_scripts(full_path, results, max_results)
 		else:
 			var ext = file_name.get_extension().to_lower()
 			if ext == "gd" or ext == "cs":

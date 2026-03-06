@@ -24,6 +24,21 @@ The plugin runs **inside the Godot editor** as an EditorPlugin with a WebSocket 
 - **Python 3 + Pillow** (optional, for asset post-processing: `pip install Pillow`)
 - **API key** (optional, for asset generation): Google AI (`GOOGLE_AI_API_KEY`) or OpenAI (`OPENAI_API_KEY`)
 
+## Quick Start
+
+```bash
+# 1. Install plugin into your Godot project
+bash /path/to/godot_claude_skill/skill/install.sh /path/to/your/godot/project
+
+# 2. Open the project in Godot, enable the plugin in Project > Project Settings > Plugins
+
+# 3. Test the connection
+bun /path/to/godot_claude_skill/skill/ws_send.ts list_commands
+
+# 4. Start building!
+bun /path/to/godot_claude_skill/skill/ws_send.ts get_scene_tree
+```
+
 ## Setup
 
 ### Step 1: Install the Godot Plugin

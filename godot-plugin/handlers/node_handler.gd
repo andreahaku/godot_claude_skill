@@ -207,7 +207,16 @@ func update_property(params: Dictionary) -> Dictionary:
 	if node == null:
 		return {"error": "Node not found: %s" % node_path, "code": "NODE_NOT_FOUND"}
 
-	var parsed_value = TypeParser.parse_value(value)
+	# Validate property exists (check property list for exact match)
+	if not property in node:
+		return {"error": "Property '%s' not found on %s (%s)" % [property, node.name, node.get_class()], "code": "NOT_FOUND",
+			"suggestions": ["Use get_node_properties to see available properties"]}
+
+	var parse_result = TypeParser.parse_value_strict(value)
+	if not parse_result.parsed:
+		return {"error": "Failed to parse value '%s' — check format (e.g. Vector2(x,y))" % str(value), "code": "PARSE_ERROR"}
+
+	var parsed_value = parse_result.value
 	var old_value = node.get(property)
 
 	_undo.create_action("Set %s.%s" % [node.name, property])

@@ -235,8 +235,9 @@ function postProcessImage(
   const { execSync } = require("child_process");
   const { writeFileSync, readFileSync, unlinkSync } = require("fs");
 
-  const tmpIn = `/tmp/_asset_gen_${Date.now()}_in.png`;
-  const tmpOut = `/tmp/_asset_gen_${Date.now()}_out.png`;
+  const uid = crypto.randomUUID().slice(0, 8);
+  const tmpIn = `/tmp/_asset_gen_${uid}_in.png`;
+  const tmpOut = `/tmp/_asset_gen_${uid}_out.png`;
 
   writeFileSync(tmpIn, pngBuffer);
 
@@ -303,7 +304,7 @@ if resize_w > 0 and resize_h > 0:
 img.save('${tmpOut}', 'PNG')
 `;
 
-  const tmpScript = `/tmp/_asset_gen_${Date.now()}_script.py`;
+  const tmpScript = `/tmp/_asset_gen_${uid}_script.py`;
   writeFileSync(tmpScript, script);
 
   try {

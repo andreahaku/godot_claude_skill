@@ -259,5 +259,11 @@ func get_particle_info(params: Dictionary) -> Dictionary:
 		info["lifetime"] = node.lifetime
 		info["emitting"] = node.emitting
 		info["one_shot"] = node.one_shot
+		if node.process_material is ParticleProcessMaterial:
+			var mat: ParticleProcessMaterial = node.process_material
+			info["direction"] = TypeParser.value_to_json(mat.direction)
+			info["spread"] = mat.spread
+			info["gravity"] = TypeParser.value_to_json(mat.gravity)
+			info["initial_velocity"] = [mat.initial_velocity_min, mat.initial_velocity_max]
 
 	return info

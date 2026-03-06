@@ -149,7 +149,7 @@ async function sendBatch(compact: boolean) {
 
           if (compact) {
             const status = data.success ? "OK" : `FAIL: ${data.error || "unknown"}`;
-            console.log(`${cmd.command}: ${status}`);
+            console.log(`[${results.length}/${commands.length}] ${cmd.command}: ${status}`);
           }
 
           // Send next command

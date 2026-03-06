@@ -31,3 +31,10 @@ static func require_node(editor: EditorInterface, path: String) -> Dictionary:
 	if node == null:
 		return {"error": "Node not found: %s" % path, "code": "NODE_NOT_FOUND"}
 	return {}
+
+
+## Normalize a resource path — ensures it starts with "res://".
+static func normalize_res_path(path: String) -> String:
+	if not path.begins_with("res://"):
+		return "res://" + path
+	return path

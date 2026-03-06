@@ -71,7 +71,8 @@ func batch_set_property(params: Dictionary) -> Dictionary:
 	var changed: Array = []
 	var errors: Array = []
 
-	_undo.create_action("Batch Set Property: %s" % property)
+	# Validate all nodes/properties first, then create undo action only if there are valid changes
+	var valid_nodes: Array = []
 	for np in node_paths:
 		var node = root.get_node_or_null(np)
 		if node == null:
@@ -80,10 +81,17 @@ func batch_set_property(params: Dictionary) -> Dictionary:
 		if not property in node:
 			errors.append({"path": np, "error": "property not found"})
 			continue
-		var old_val = node.get(property)
-		_undo.add_do_property(node, StringName(property), parsed)
-		_undo.add_undo_property(node, StringName(property), old_val)
-		changed.append(np)
+		valid_nodes.append({"path": np, "node": node})
+
+	if valid_nodes.is_empty():
+		return {"changed": [], "errors": errors, "count": 0}
+
+	_undo.create_action("Batch Set Property: %s" % property)
+	for entry in valid_nodes:
+		var old_val = entry.node.get(property)
+		_undo.add_do_property(entry.node, StringName(property), parsed)
+		_undo.add_undo_property(entry.node, StringName(property), old_val)
+		changed.append(entry.path)
 	_undo.commit_action()
 
 	return {"changed": changed, "errors": errors, "count": changed.size()}

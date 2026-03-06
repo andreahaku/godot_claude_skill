@@ -2,8 +2,8 @@
 class_name AudioHandler
 extends RefCounted
 
-## Audio tools (6):
-## get_audio_bus_layout, add_audio_bus, set_audio_bus,
+## Audio tools (7):
+## get_audio_bus_layout, add_audio_bus, remove_audio_bus, set_audio_bus,
 ## add_audio_bus_effect, add_audio_player, get_audio_info
 
 var _editor: EditorInterface
@@ -19,6 +19,7 @@ func get_commands() -> Dictionary:
 	return {
 		"get_audio_bus_layout": get_audio_bus_layout,
 		"add_audio_bus": add_audio_bus,
+		"remove_audio_bus": remove_audio_bus,
 		"set_audio_bus": set_audio_bus,
 		"add_audio_bus_effect": add_audio_bus_effect,
 		"add_audio_player": add_audio_player,
@@ -59,6 +60,21 @@ func add_audio_bus(params: Dictionary) -> Dictionary:
 	AudioServer.set_bus_volume_db(idx, volume_db)
 
 	return {"name": bus_name, "index": idx, "send_to": send_to}
+
+
+func remove_audio_bus(params: Dictionary) -> Dictionary:
+	var bus_name: String = params.get("name", "")
+	if bus_name == "":
+		return {"error": "name is required", "code": "MISSING_PARAM"}
+	if bus_name == "Master":
+		return {"error": "Cannot remove Master bus", "code": "INVALID_TYPE"}
+
+	var idx = AudioServer.get_bus_index(bus_name)
+	if idx < 0:
+		return {"error": "Bus not found: %s" % bus_name, "code": "BUS_NOT_FOUND"}
+
+	AudioServer.remove_bus(idx)
+	return {"removed": bus_name}
 
 
 func set_audio_bus(params: Dictionary) -> Dictionary:

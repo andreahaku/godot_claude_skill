@@ -135,6 +135,34 @@ static func parse_value(value) -> Variant:
 	return value
 
 
+## Like parse_value but returns {"value": Variant, "parsed": bool}.
+## "parsed" is true if the string was recognized as a type expression and converted,
+## false if it was returned as-is (plain string or unrecognized format).
+static func parse_value_strict(value) -> Dictionary:
+	if value == null:
+		return {"value": null, "parsed": true}
+	if not value is String:
+		return {"value": value, "parsed": true}
+
+	var s: String = value.strip_edges()
+	var result = parse_value(value)
+
+	# If parse_value returned something other than the original string, it was parsed
+	if typeof(result) != TYPE_STRING or result != value:
+		return {"value": result, "parsed": true}
+
+	# Check if the string looks like it was INTENDED to be a type expression but failed
+	var type_prefixes := ["Vector2(", "Vector2i(", "Vector3(", "Vector3i(", "Vector4(",
+		"Color(", "Rect2(", "AABB(", "Plane(", "Quaternion(", "Basis(",
+		"Transform2D(", "Transform3D(", "NodePath("]
+	for prefix in type_prefixes:
+		if s.begins_with(prefix):
+			return {"value": value, "parsed": false}
+
+	# Plain string — not a failed parse
+	return {"value": value, "parsed": true}
+
+
 static func _extract_args(s: String, prefix: String) -> PackedStringArray:
 	if not s.begins_with(prefix + "(") or not s.ends_with(")"):
 		return PackedStringArray()

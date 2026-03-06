@@ -28,25 +28,25 @@ Error handling, crash prevention, undo gaps.
 
 Missing commands, param consistency, documentation.
 
-- [ ] **2.1** Add missing inspection commands:
-  - [ ] AnimationTreeHandler: `get_state_machine_states` to list states
-  - [ ] ParticlesHandler: return material params in `get_particle_info`
-  - [ ] AudioHandler: `remove_audio_bus` command
-- [ ] **2.2** Fix inconsistent parameter naming across handlers — audit `name` vs `node_name`, document conventions
-- [ ] **2.3** Add property existence check in `node_handler.gd:update_property` before calling `node.set()`
-- [ ] **2.4** Add `max_depth` / `max_results` params to `script_handler.gd:list_scripts`
-- [ ] **2.5** Fix `batch_set_property` to validate all nodes/properties before creating undo action
-- [ ] **2.6** Extract shared path normalization utility — `if not path.begins_with("res://")` used in 10+ handlers
-- [ ] **2.7** Use `crypto.randomUUID()` instead of `Date.now()` for temp files in `generate_asset.ts`
-- [ ] **2.8** Add batch progress output in `ws_send.ts` — show `[3/10]` counter during batch execution
-- [ ] **2.9** Expand `godot.md` skill docs:
-  - [ ] Add full param details for Animation, TileMap, 3D Scene sections
-  - [ ] Document all error codes
-  - [ ] Clarify batch vs batch_execute usage
-  - [ ] Document all `create_sprite_frames` params (frame_count, columns)
-- [ ] **2.10** Fix `install.sh` example command path (line 52) and add Godot version check
-- [ ] **2.11** Add quick-start section to README — single copy-paste from install to first command
-- [ ] **2.12** Fix `TypeParser` silent parse failures — distinguish "parsed null" from "parse error"
+- [x] **2.1** Add missing inspection commands:
+  - N/A AnimationTreeHandler: `get_state_machine_states` — already covered by `get_animation_tree_structure`
+  - [x] ParticlesHandler: return material params in `get_particle_info` for 2D
+  - [x] AudioHandler: `remove_audio_bus` command
+- [x] **2.2** Document parameter naming conventions in godot.md (`name` vs `node_name`)
+- [x] **2.3** Add property existence check in `node_handler.gd:update_property` before calling `node.set()`
+- [x] **2.4** Add `max_results` param to `script_handler.gd:list_scripts` (default 500, with truncation flag)
+- [x] **2.5** Fix `batch_set_property` to validate all nodes/properties before creating undo action
+- [x] **2.6** Extract shared `normalize_res_path()` utility in NodeFinder
+- [x] **2.7** Use `crypto.randomUUID()` instead of `Date.now()` for temp files in `generate_asset.ts`
+- [x] **2.8** Add batch progress output in `ws_send.ts` — show `[3/10]` counter during batch execution
+- [x] **2.9** Expand `godot.md` skill docs:
+  - [x] Add full param details for all 15 handler categories
+  - [x] Document all error codes
+  - [x] Clarify batch vs batch_execute usage
+  - [x] Document parameter naming conventions
+- [x] **2.10** Fix `install.sh` example command path and add Godot version check
+- [x] **2.11** Add quick-start section to README
+- [x] **2.12** Add `TypeParser.parse_value_strict()` — returns `{value, parsed}` to distinguish parse failures; used in `update_property`
 
 ## Phase 3 — Polish (P3)
 
@@ -66,5 +66,5 @@ Performance, DX, code quality.
 | Phase | Status | Items | Done |
 |-------|--------|-------|------|
 | Phase 1 — Robustness | **Done** | 10 | 10 |
-| Phase 2 — Completeness | Not started | 12 | 0 |
+| Phase 2 — Completeness | **Done** | 12 | 12 |
 | Phase 3 — Polish | Not started | 8 | 0 |
