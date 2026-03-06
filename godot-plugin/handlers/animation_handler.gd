@@ -87,8 +87,8 @@ func create_animation(params: Dictionary) -> Dictionary:
 		player.add_animation_library("", lib)
 
 	_undo.create_action("Create Animation: %s" % anim_name)
-	_undo.add_do_method(lib.add_animation.bind(anim_name, anim))
-	_undo.add_undo_method(lib.remove_animation.bind(anim_name))
+	_undo.add_do_method(lib, &"add_animation", [anim_name, anim])
+	_undo.add_undo_method(lib, &"remove_animation", [anim_name])
 	_undo.commit_action()
 
 	return {"name": anim_name, "length": length, "loop": loop}
@@ -217,8 +217,8 @@ func remove_animation(params: Dictionary) -> Dictionary:
 	if lib:
 		_undo.create_action("Remove Animation: %s" % anim_name)
 		var anim = player.get_animation(anim_name)
-		_undo.add_do_method(lib.remove_animation.bind(anim_name))
-		_undo.add_undo_method(lib.add_animation.bind(anim_name, anim))
+		_undo.add_do_method(lib, &"remove_animation", [anim_name])
+		_undo.add_undo_method(lib, &"add_animation", [anim_name, anim])
 		_undo.commit_action()
 
 	return {"removed": anim_name}

@@ -65,10 +65,10 @@ func add_mesh_instance(params: Dictionary) -> Dictionary:
 				var instance = packed.instantiate()
 				instance.name = node_name
 				_undo.create_action("Add 3D Scene: %s" % node_name)
-				_undo.add_do_method(parent.add_child.bind(instance))
-				_undo.add_do_method(instance.set_owner.bind(root))
+				_undo.add_do_method(parent, &"add_child", [instance])
+				_undo.add_do_method(instance, &"set_owner", [root])
 				_undo.add_do_reference(instance)
-				_undo.add_undo_method(parent.remove_child.bind(instance))
+				_undo.add_undo_method(parent, &"remove_child", [instance])
 				_undo.commit_action()
 				return {"node_path": str(root.get_path_to(instance)), "source": scene_file}
 	else:
@@ -100,10 +100,10 @@ func add_mesh_instance(params: Dictionary) -> Dictionary:
 		mesh_instance.mesh = mesh
 
 	_undo.create_action("Add Mesh: %s" % node_name)
-	_undo.add_do_method(parent.add_child.bind(mesh_instance))
-	_undo.add_do_method(mesh_instance.set_owner.bind(root))
+	_undo.add_do_method(parent, &"add_child", [mesh_instance])
+	_undo.add_do_method(mesh_instance, &"set_owner", [root])
 	_undo.add_do_reference(mesh_instance)
-	_undo.add_undo_method(parent.remove_child.bind(mesh_instance))
+	_undo.add_undo_method(parent, &"remove_child", [mesh_instance])
 	_undo.commit_action()
 
 	return {"node_path": str(root.get_path_to(mesh_instance)), "mesh_type": mesh_type}
@@ -121,7 +121,7 @@ func setup_lighting(params: Dictionary) -> Dictionary:
 	if parent == null:
 		return {"error": "Parent not found", "code": "NODE_NOT_FOUND"}
 
-	var created: Array = []
+	var lights: Array = []
 
 	match preset.to_lower():
 		"sun", "outdoor":
@@ -130,45 +130,47 @@ func setup_lighting(params: Dictionary) -> Dictionary:
 			light.rotation_degrees = Vector3(-45, -30, 0)
 			light.shadow_enabled = true
 			light.light_energy = 1.0
-			parent.add_child(light)
-			light.set_owner(root)
-			created.append(str(root.get_path_to(light)))
+			lights.append(light)
 		"indoor":
 			var light = OmniLight3D.new()
 			light.name = "IndoorLight"
 			light.position = Vector3(0, 3, 0)
 			light.omni_range = 10.0
 			light.shadow_enabled = true
-			parent.add_child(light)
-			light.set_owner(root)
-			created.append(str(root.get_path_to(light)))
+			lights.append(light)
 		"dramatic":
 			var key = DirectionalLight3D.new()
 			key.name = "KeyLight"
 			key.rotation_degrees = Vector3(-30, -45, 0)
 			key.light_energy = 1.2
 			key.shadow_enabled = true
-			parent.add_child(key)
-			key.set_owner(root)
-			created.append(str(root.get_path_to(key)))
+			lights.append(key)
 
 			var fill = OmniLight3D.new()
 			fill.name = "FillLight"
 			fill.position = Vector3(3, 2, 3)
 			fill.light_energy = 0.4
 			fill.light_color = Color(0.8, 0.9, 1.0)
-			parent.add_child(fill)
-			fill.set_owner(root)
-			created.append(str(root.get_path_to(fill)))
+			lights.append(fill)
 
 			var rim = SpotLight3D.new()
 			rim.name = "RimLight"
 			rim.position = Vector3(-2, 3, -2)
 			rim.rotation_degrees = Vector3(-45, 135, 0)
 			rim.light_energy = 0.8
-			parent.add_child(rim)
-			rim.set_owner(root)
-			created.append(str(root.get_path_to(rim)))
+			lights.append(rim)
+
+	_undo.create_action("Setup Lighting: %s" % preset)
+	for light in lights:
+		_undo.add_do_method(parent, &"add_child", [light])
+		_undo.add_do_method(light, &"set_owner", [root])
+		_undo.add_do_reference(light)
+		_undo.add_undo_method(parent, &"remove_child", [light])
+	_undo.commit_action()
+
+	var created: Array = []
+	for light in lights:
+		created.append(str(root.get_path_to(light)))
 
 	return {"preset": preset, "created": created}
 
@@ -254,10 +256,10 @@ func setup_environment(params: Dictionary) -> Dictionary:
 	env_node.environment = env
 
 	_undo.create_action("Setup Environment")
-	_undo.add_do_method(parent.add_child.bind(env_node))
-	_undo.add_do_method(env_node.set_owner.bind(root))
+	_undo.add_do_method(parent, &"add_child", [env_node])
+	_undo.add_do_method(env_node, &"set_owner", [root])
 	_undo.add_do_reference(env_node)
-	_undo.add_undo_method(parent.remove_child.bind(env_node))
+	_undo.add_undo_method(parent, &"remove_child", [env_node])
 	_undo.commit_action()
 
 	return {"node_path": str(root.get_path_to(env_node))}
@@ -286,10 +288,10 @@ func setup_camera_3d(params: Dictionary) -> Dictionary:
 		camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 
 	_undo.create_action("Add Camera3D")
-	_undo.add_do_method(parent.add_child.bind(camera))
-	_undo.add_do_method(camera.set_owner.bind(root))
+	_undo.add_do_method(parent, &"add_child", [camera])
+	_undo.add_do_method(camera, &"set_owner", [root])
 	_undo.add_do_reference(camera)
-	_undo.add_undo_method(parent.remove_child.bind(camera))
+	_undo.add_undo_method(parent, &"remove_child", [camera])
 	_undo.commit_action()
 
 	# Look at target after adding to tree
@@ -324,10 +326,10 @@ func add_gridmap(params: Dictionary) -> Dictionary:
 			gridmap.mesh_library = lib
 
 	_undo.create_action("Add GridMap")
-	_undo.add_do_method(parent.add_child.bind(gridmap))
-	_undo.add_do_method(gridmap.set_owner.bind(root))
+	_undo.add_do_method(parent, &"add_child", [gridmap])
+	_undo.add_do_method(gridmap, &"set_owner", [root])
 	_undo.add_do_reference(gridmap)
-	_undo.add_undo_method(parent.remove_child.bind(gridmap))
+	_undo.add_undo_method(parent, &"remove_child", [gridmap])
 	_undo.commit_action()
 
 	return {"node_path": str(root.get_path_to(gridmap))}

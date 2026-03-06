@@ -107,10 +107,10 @@ func setup_collision(params: Dictionary) -> Dictionary:
 	collision_shape.name = "CollisionShape"
 
 	_undo.create_action("Setup Collision: %s" % node.name)
-	_undo.add_do_method(node.add_child.bind(collision_shape))
-	_undo.add_do_method(collision_shape.set_owner.bind(root))
+	_undo.add_do_method(node, &"add_child", [collision_shape])
+	_undo.add_do_method(collision_shape, &"set_owner", [root])
 	_undo.add_do_reference(collision_shape)
-	_undo.add_undo_method(node.remove_child.bind(collision_shape))
+	_undo.add_undo_method(node, &"remove_child", [collision_shape])
 	_undo.commit_action()
 
 	return {"node_path": str(root.get_path_to(collision_shape)), "shape_type": shape_type, "is_3d": is_3d}
@@ -202,10 +202,10 @@ func add_raycast(params: Dictionary) -> Dictionary:
 		raycast = rc
 
 	_undo.create_action("Add RayCast")
-	_undo.add_do_method(parent.add_child.bind(raycast))
-	_undo.add_do_method(raycast.set_owner.bind(root))
+	_undo.add_do_method(parent, &"add_child", [raycast])
+	_undo.add_do_method(raycast, &"set_owner", [root])
 	_undo.add_do_reference(raycast)
-	_undo.add_undo_method(parent.remove_child.bind(raycast))
+	_undo.add_undo_method(parent, &"remove_child", [raycast])
 	_undo.commit_action()
 
 	return {"node_path": str(root.get_path_to(raycast)), "is_3d": is_3d}

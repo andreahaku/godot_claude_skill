@@ -58,10 +58,10 @@ func setup_navigation_region(params: Dictionary) -> Dictionary:
 		region = r
 
 	_undo.create_action("Add Navigation Region")
-	_undo.add_do_method(parent.add_child.bind(region))
-	_undo.add_do_method(region.set_owner.bind(root))
+	_undo.add_do_method(parent, &"add_child", [region])
+	_undo.add_do_method(region, &"set_owner", [root])
 	_undo.add_do_reference(region)
-	_undo.add_undo_method(parent.remove_child.bind(region))
+	_undo.add_undo_method(parent, &"remove_child", [region])
 	_undo.commit_action()
 
 	return {"node_path": str(root.get_path_to(region)), "is_3d": is_3d}
@@ -117,10 +117,10 @@ func setup_navigation_agent(params: Dictionary) -> Dictionary:
 		agent = a
 
 	_undo.create_action("Add Navigation Agent")
-	_undo.add_do_method(parent.add_child.bind(agent))
-	_undo.add_do_method(agent.set_owner.bind(root))
+	_undo.add_do_method(parent, &"add_child", [agent])
+	_undo.add_do_method(agent, &"set_owner", [root])
 	_undo.add_do_reference(agent)
-	_undo.add_undo_method(parent.remove_child.bind(agent))
+	_undo.add_undo_method(parent, &"remove_child", [agent])
 	_undo.commit_action()
 
 	return {"node_path": str(root.get_path_to(agent)), "is_3d": is_3d}

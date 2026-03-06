@@ -64,10 +64,10 @@ func create_particles(params: Dictionary) -> Dictionary:
 		particles = p
 
 	_undo.create_action("Create Particles: %s" % node_name)
-	_undo.add_do_method(parent.add_child.bind(particles))
-	_undo.add_do_method(particles.set_owner.bind(root))
+	_undo.add_do_method(parent, &"add_child", [particles])
+	_undo.add_do_method(particles, &"set_owner", [root])
 	_undo.add_do_reference(particles)
-	_undo.add_undo_method(parent.remove_child.bind(particles))
+	_undo.add_undo_method(parent, &"remove_child", [particles])
 	_undo.commit_action()
 
 	return {"node_path": str(root.get_path_to(particles)), "is_3d": is_3d, "amount": amount}

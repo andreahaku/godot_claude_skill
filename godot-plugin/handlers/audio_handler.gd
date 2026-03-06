@@ -183,10 +183,10 @@ func add_audio_player(params: Dictionary) -> Dictionary:
 				player.stream = stream
 
 	_undo.create_action("Add Audio Player")
-	_undo.add_do_method(parent.add_child.bind(player))
-	_undo.add_do_method(player.set_owner.bind(root))
+	_undo.add_do_method(parent, &"add_child", [player])
+	_undo.add_do_method(player, &"set_owner", [root])
 	_undo.add_do_reference(player)
-	_undo.add_undo_method(parent.remove_child.bind(player))
+	_undo.add_undo_method(parent, &"remove_child", [player])
 	_undo.commit_action()
 
 	return {"node_path": str(root.get_path_to(player)), "bus": bus, "is_3d": is_3d}

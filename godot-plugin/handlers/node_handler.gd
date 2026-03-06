@@ -84,10 +84,10 @@ func add_node(params: Dictionary) -> Dictionary:
 			node.set(key, value)
 
 	_undo.create_action("Add Node: %s" % node.name)
-	_undo.add_do_method(parent.add_child.bind(node))
-	_undo.add_do_method(node.set_owner.bind(root))
+	_undo.add_do_method(parent, &"add_child", [node])
+	_undo.add_do_method(node, &"set_owner", [root])
 	_undo.add_do_reference(node)
-	_undo.add_undo_method(parent.remove_child.bind(node))
+	_undo.add_undo_method(parent, &"remove_child", [node])
 	_undo.commit_action()
 
 	return {"node_path": str(root.get_path_to(node)), "node_type": node.get_class(), "node_name": str(node.name)}
@@ -113,10 +113,10 @@ func delete_node(params: Dictionary) -> Dictionary:
 	var index = node.get_index()
 
 	_undo.create_action("Delete Node: %s" % node.name)
-	_undo.add_do_method(parent.remove_child.bind(node))
-	_undo.add_undo_method(parent.add_child.bind(node))
-	_undo.add_undo_method(parent.move_child.bind(node, index))
-	_undo.add_undo_method(node.set_owner.bind(root))
+	_undo.add_do_method(parent, &"remove_child", [node])
+	_undo.add_undo_method(parent, &"add_child", [node])
+	_undo.add_undo_method(parent, &"move_child", [node, index])
+	_undo.add_undo_method(node, &"set_owner", [root])
 	_undo.add_undo_reference(node)
 	_undo.commit_action()
 
@@ -163,10 +163,10 @@ func duplicate_node(params: Dictionary) -> Dictionary:
 		dup.name = new_name
 
 	_undo.create_action("Duplicate Node: %s" % node.name)
-	_undo.add_do_method(parent.add_child.bind(dup))
-	_undo.add_do_method(dup.set_owner.bind(root))
+	_undo.add_do_method(parent, &"add_child", [dup])
+	_undo.add_do_method(dup, &"set_owner", [root])
 	_undo.add_do_reference(dup)
-	_undo.add_undo_method(parent.remove_child.bind(dup))
+	_undo.add_undo_method(parent, &"remove_child", [dup])
 	_undo.commit_action()
 
 	# Set owner for all children recursively
@@ -197,13 +197,13 @@ func move_node(params: Dictionary) -> Dictionary:
 	var old_index = node.get_index()
 
 	_undo.create_action("Move Node: %s to %s" % [node.name, new_parent.name])
-	_undo.add_do_method(old_parent.remove_child.bind(node))
-	_undo.add_do_method(new_parent.add_child.bind(node))
-	_undo.add_do_method(node.set_owner.bind(root))
-	_undo.add_undo_method(new_parent.remove_child.bind(node))
-	_undo.add_undo_method(old_parent.add_child.bind(node))
-	_undo.add_undo_method(old_parent.move_child.bind(node, old_index))
-	_undo.add_undo_method(node.set_owner.bind(root))
+	_undo.add_do_method(old_parent, &"remove_child", [node])
+	_undo.add_do_method(new_parent, &"add_child", [node])
+	_undo.add_do_method(node, &"set_owner", [root])
+	_undo.add_undo_method(new_parent, &"remove_child", [node])
+	_undo.add_undo_method(old_parent, &"add_child", [node])
+	_undo.add_undo_method(old_parent, &"move_child", [node, old_index])
+	_undo.add_undo_method(node, &"set_owner", [root])
 	_undo.commit_action()
 
 	return {"node": str(node.name), "new_path": str(root.get_path_to(node))}
@@ -320,7 +320,7 @@ func set_anchor_preset(params: Dictionary) -> Dictionary:
 	var old_offsets = [control.offset_left, control.offset_top, control.offset_right, control.offset_bottom]
 
 	_undo.create_action("Set Anchor Preset: %s" % node.name)
-	_undo.add_do_method(control.set_anchors_and_offsets_preset.bind(preset))
+	_undo.add_do_method(control, &"set_anchors_and_offsets_preset", [preset])
 	_undo.add_undo_property(control, &"anchor_left", old_anchors[0])
 	_undo.add_undo_property(control, &"anchor_top", old_anchors[1])
 	_undo.add_undo_property(control, &"anchor_right", old_anchors[2])
@@ -358,8 +358,8 @@ func connect_signal_cmd(params: Dictionary) -> Dictionary:
 		return {"error": "Signal already connected", "code": "ALREADY_CONNECTED"}
 
 	_undo.create_action("Connect Signal: %s.%s -> %s.%s" % [source.name, signal_name, target.name, method_name])
-	_undo.add_do_method(source.connect.bind(signal_name, Callable(target, method_name)))
-	_undo.add_undo_method(source.disconnect.bind(signal_name, Callable(target, method_name)))
+	_undo.add_do_method(source, &"connect", [signal_name, Callable(target, method_name)])
+	_undo.add_undo_method(source, &"disconnect", [signal_name, Callable(target, method_name)])
 	_undo.commit_action()
 
 	return {"source": source_path, "signal": signal_name, "target": target_path, "method": method_name}
@@ -386,8 +386,8 @@ func disconnect_signal_cmd(params: Dictionary) -> Dictionary:
 		return {"error": "Signal not connected", "code": "NOT_CONNECTED"}
 
 	_undo.create_action("Disconnect Signal: %s.%s -> %s.%s" % [source.name, signal_name, target.name, method_name])
-	_undo.add_do_method(source.disconnect.bind(signal_name, Callable(target, method_name)))
-	_undo.add_undo_method(source.connect.bind(signal_name, Callable(target, method_name)))
+	_undo.add_do_method(source, &"disconnect", [signal_name, Callable(target, method_name)])
+	_undo.add_undo_method(source, &"connect", [signal_name, Callable(target, method_name)])
 	_undo.commit_action()
 
 	return {"disconnected": true, "source": source_path, "signal": signal_name, "target": target_path, "method": method_name}

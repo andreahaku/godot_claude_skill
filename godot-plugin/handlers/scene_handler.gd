@@ -191,10 +191,10 @@ func add_scene_instance(params: Dictionary) -> Dictionary:
 		return {"error": "Failed to instantiate scene", "code": "INSTANCE_ERROR"}
 
 	_undo.create_action("Add Scene Instance: %s" % instance.name)
-	_undo.add_do_method(parent.add_child.bind(instance))
-	_undo.add_do_method(instance.set_owner.bind(root))
+	_undo.add_do_method(parent, &"add_child", [instance])
+	_undo.add_do_method(instance, &"set_owner", [root])
 	_undo.add_do_reference(instance)
-	_undo.add_undo_method(parent.remove_child.bind(instance))
+	_undo.add_undo_method(parent, &"remove_child", [instance])
 	_undo.commit_action()
 
 	return {"node_path": str(root.get_path_to(instance)), "scene_path": scene_path}

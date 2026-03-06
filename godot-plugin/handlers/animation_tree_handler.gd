@@ -79,10 +79,10 @@ func create_animation_tree(params: Dictionary) -> Dictionary:
 			tree.tree_root = AnimationNodeStateMachine.new()
 
 	_undo.create_action("Create AnimationTree")
-	_undo.add_do_method(parent.add_child.bind(tree))
-	_undo.add_do_method(tree.set_owner.bind(root))
+	_undo.add_do_method(parent, &"add_child", [tree])
+	_undo.add_do_method(tree, &"set_owner", [root])
 	_undo.add_do_reference(tree)
-	_undo.add_undo_method(parent.remove_child.bind(tree))
+	_undo.add_undo_method(parent, &"remove_child", [tree])
 	_undo.commit_action()
 
 	return {"node_path": str(root.get_path_to(tree)), "root_type": root_type}

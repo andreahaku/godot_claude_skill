@@ -4,10 +4,10 @@ extends RefCounted
 
 ## Wraps Godot's UndoRedo system for consistent undo/redo support.
 ## Every mutation should go through this helper so Ctrl+Z works for all AI operations.
-## Uses EditorUndoRedoManager API for Godot 4.x
 ##
-## In Godot 4.6, EditorUndoRedoManager.add_do_method() signature requires
-## decomposing Callables into (object, method) + bound args.
+## In Godot 4.6, EditorUndoRedoManager.add_do_method() uses vararg signature:
+##   add_do_method(object: Object, method: StringName, arg1, arg2, ...)
+## We use callv() to forward an array of arguments to this vararg method.
 
 var _undo_redo: EditorUndoRedoManager
 
@@ -20,22 +20,16 @@ func create_action(name: String, merge_mode: int = 0) -> void:
 	_undo_redo.create_action(name, merge_mode)
 
 
-func add_do_method(callable: Callable) -> void:
-	_call_method(&"add_do_method", callable)
-
-
-func add_undo_method(callable: Callable) -> void:
-	_call_method(&"add_undo_method", callable)
-
-
-func _call_method(fn: StringName, callable: Callable) -> void:
-	var obj = callable.get_object()
-	var method = callable.get_method()
-	var args = callable.get_bound_arguments()
-	# Build the full argument array: [object, method, ...bound_args]
-	var call_args: Array = [obj, method]
+func add_do_method(object: Object, method: StringName, args: Array = []) -> void:
+	var call_args: Array = [object, method]
 	call_args.append_array(args)
-	_undo_redo.callv(fn, call_args)
+	_undo_redo.callv(&"add_do_method", call_args)
+
+
+func add_undo_method(object: Object, method: StringName, args: Array = []) -> void:
+	var call_args: Array = [object, method]
+	call_args.append_array(args)
+	_undo_redo.callv(&"add_undo_method", call_args)
 
 
 func add_do_property(object: Object, property: StringName, value: Variant) -> void:

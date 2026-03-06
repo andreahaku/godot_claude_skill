@@ -158,7 +158,7 @@ func cross_scene_set_property(params: Dictionary) -> Dictionary:
 			continue
 
 		var instance = packed.instantiate()
-		var modified: int = 0
+		var modified: Array = [0]
 		_set_property_recursive(instance, node_type, property, parsed, modified)
 
 		# Re-pack and save
@@ -167,7 +167,7 @@ func cross_scene_set_property(params: Dictionary) -> Dictionary:
 		ResourceSaver.save(new_packed, sp)
 		instance.queue_free()
 
-		results.append({"scene": sp, "modified": modified})
+		results.append({"scene": sp, "modified": modified[0]})
 
 	_editor.get_resource_filesystem().scan()
 	return {"results": results}
@@ -233,10 +233,10 @@ func _search_in_files(path: String, search: String, file_types: Array, results: 
 	dir.list_dir_end()
 
 
-func _set_property_recursive(node: Node, type_filter: String, property: String, value: Variant, modified: int) -> void:
+func _set_property_recursive(node: Node, type_filter: String, property: String, value: Variant, modified: Array) -> void:
 	if type_filter == "" or node.is_class(type_filter):
 		if property in node:
 			node.set(property, value)
-			modified += 1
+			modified[0] += 1
 	for child in node.get_children():
 		_set_property_recursive(child, type_filter, property, value, modified)
