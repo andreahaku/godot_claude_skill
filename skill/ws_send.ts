@@ -1,33 +1,35 @@
 #!/usr/bin/env bun
 /**
  * WebSocket client for communicating with the GodotClaudeSkill plugin.
- * Usage: bun ws_send.ts <command> [json_params]
  *
- * Sends a command to the Godot editor plugin and prints the response.
+ * Single command:
+ *   bun ws_send.ts <command> [json_params]
+ *
+ * Batch mode (reads JSON lines from stdin):
+ *   echo '{"command":"add_node","params":{"node_name":"Foo","node_type":"Node2D"}}' | bun ws_send.ts --batch
+ *   cat commands.jsonl | bun ws_send.ts --batch
+ *
+ * Compact output (only success/fail, no full JSON):
+ *   bun ws_send.ts --compact add_node '{"node_name":"Foo","node_type":"Node2D"}'
  */
 
 const WS_URL = process.env.GODOT_WS_URL || "ws://127.0.0.1:9080";
 const TIMEOUT_MS = parseInt(process.env.GODOT_TIMEOUT || "30000", 10);
 
-async function main() {
-  const args = process.argv.slice(2);
-  if (args.length === 0) {
-    console.error("Usage: bun ws_send.ts <command> [json_params]");
-    process.exit(1);
-  }
+interface CommandMsg {
+  id: string;
+  command: string;
+  params: Record<string, unknown>;
+}
 
-  const command = args[0];
-  let params: Record<string, unknown> = {};
+interface ResponseMsg {
+  id: string;
+  success: boolean;
+  result?: unknown;
+  error?: string;
+}
 
-  if (args[1]) {
-    try {
-      params = JSON.parse(args[1]);
-    } catch {
-      console.error("Invalid JSON params:", args[1]);
-      process.exit(1);
-    }
-  }
-
+async function sendSingle(command: string, params: Record<string, unknown>, compact: boolean) {
   const id = crypto.randomUUID();
   const message = JSON.stringify({ id, command, params });
 
@@ -47,9 +49,13 @@ async function main() {
     ws.addEventListener("message", (event) => {
       clearTimeout(timeout);
       try {
-        const data = JSON.parse(event.data as string);
+        const data = JSON.parse(event.data as string) as ResponseMsg;
         if (data.id === id) {
-          console.log(JSON.stringify(data, null, 2));
+          if (compact) {
+            console.log(data.success ? "OK" : `FAIL: ${data.error || "unknown"}`);
+          } else {
+            console.log(JSON.stringify(data, null, 2));
+          }
           ws.close();
           process.exit(data.success ? 0 : 1);
         }
@@ -59,7 +65,7 @@ async function main() {
       }
     });
 
-    ws.addEventListener("error", (event) => {
+    ws.addEventListener("error", () => {
       clearTimeout(timeout);
       console.error(JSON.stringify({
         success: false,
@@ -73,12 +79,152 @@ async function main() {
       clearTimeout(timeout);
     });
   } catch (err) {
-    console.error(JSON.stringify({
-      success: false,
-      error: `Connection failed: ${err}`,
-    }));
+    console.error(JSON.stringify({ success: false, error: `Connection failed: ${err}` }));
     process.exit(1);
   }
+}
+
+async function sendBatch(compact: boolean) {
+  // Read all lines from stdin
+  const input = await Bun.stdin.text();
+  const lines = input.trim().split("\n").filter((l) => l.trim());
+
+  if (lines.length === 0) {
+    console.error("No commands provided on stdin");
+    process.exit(1);
+  }
+
+  // Parse all commands
+  const commands: CommandMsg[] = [];
+  for (const line of lines) {
+    try {
+      const parsed = JSON.parse(line);
+      commands.push({
+        id: crypto.randomUUID(),
+        command: parsed.command,
+        params: parsed.params || {},
+      });
+    } catch {
+      console.error(`Invalid JSON: ${line}`);
+      process.exit(1);
+    }
+  }
+
+  return new Promise<void>((resolvePromise) => {
+    const ws = new WebSocket(WS_URL);
+    const pending = new Map<string, CommandMsg>();
+    const results: { command: string; success: boolean; error?: string }[] = [];
+    let sent = 0;
+
+    const timeout = setTimeout(() => {
+      console.error(JSON.stringify({ success: false, error: "Batch timeout" }));
+      ws.close();
+      process.exit(1);
+    }, TIMEOUT_MS * 2);
+
+    ws.addEventListener("open", () => {
+      // Send commands sequentially — Godot processes them in order
+      sendNext();
+    });
+
+    function sendNext() {
+      if (sent >= commands.length) return;
+      const cmd = commands[sent];
+      pending.set(cmd.id, cmd);
+      ws.send(JSON.stringify(cmd));
+      sent++;
+    }
+
+    ws.addEventListener("message", (event) => {
+      try {
+        const data = JSON.parse(event.data as string) as ResponseMsg;
+        const cmd = pending.get(data.id);
+        if (cmd) {
+          pending.delete(data.id);
+          results.push({
+            command: cmd.command,
+            success: data.success,
+            error: data.success ? undefined : (data.error as string),
+          });
+
+          if (compact) {
+            const status = data.success ? "OK" : `FAIL: ${data.error || "unknown"}`;
+            console.log(`${cmd.command}: ${status}`);
+          }
+
+          // Send next command
+          if (sent < commands.length) {
+            sendNext();
+          }
+
+          // All done?
+          if (results.length >= commands.length) {
+            clearTimeout(timeout);
+            if (!compact) {
+              const succeeded = results.filter((r) => r.success).length;
+              const failed = results.filter((r) => !r.success).length;
+              console.log(JSON.stringify({ total: results.length, succeeded, failed, results }, null, 2));
+            }
+            ws.close();
+            const hasFailure = results.some((r) => !r.success);
+            process.exit(hasFailure ? 1 : 0);
+          }
+        }
+      } catch {
+        // ignore parse errors
+      }
+    });
+
+    ws.addEventListener("error", () => {
+      clearTimeout(timeout);
+      console.error(JSON.stringify({
+        success: false,
+        error: "WebSocket connection failed",
+      }));
+      process.exit(1);
+    });
+  });
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+
+  if (args.length === 0) {
+    console.error(`Usage:
+  bun ws_send.ts <command> [json_params]           Single command
+  bun ws_send.ts --compact <command> [json_params]  Compact output (OK/FAIL)
+  echo '{"command":"x","params":{}}' | bun ws_send.ts --batch    Batch from stdin
+  cat commands.jsonl | bun ws_send.ts --batch --compact          Batch compact`);
+    process.exit(1);
+  }
+
+  const compact = args.includes("--compact");
+  const batch = args.includes("--batch");
+  const filteredArgs = args.filter((a) => !a.startsWith("--"));
+
+  if (batch) {
+    await sendBatch(compact);
+    return;
+  }
+
+  if (filteredArgs.length === 0) {
+    console.error("No command specified");
+    process.exit(1);
+  }
+
+  const command = filteredArgs[0];
+  let params: Record<string, unknown> = {};
+
+  if (filteredArgs[1]) {
+    try {
+      params = JSON.parse(filteredArgs[1]);
+    } catch {
+      console.error("Invalid JSON params:", filteredArgs[1]);
+      process.exit(1);
+    }
+  }
+
+  await sendSingle(command, params, compact);
 }
 
 main();

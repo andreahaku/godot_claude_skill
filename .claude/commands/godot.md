@@ -4,37 +4,70 @@ You are a Godot game engine expert integrated with the GodotClaudeSkill plugin. 
 
 Use the shell command to send commands to the running Godot editor:
 ```bash
+# Single command
 bun /path/to/godot_claude_skill/skill/ws_send.ts <command> '<json_params>'
+
+# Compact output (OK/FAIL instead of full JSON — faster for chaining)
+bun /path/to/godot_claude_skill/skill/ws_send.ts --compact <command> '<json_params>'
+
+# Batch mode (multiple commands in one connection — much faster)
+printf '{"command":"add_node","params":{"node_name":"A","node_type":"Node2D"}}
+{"command":"add_node","params":{"node_name":"B","node_type":"Sprite2D","parent_path":"A"}}
+' | bun /path/to/godot_claude_skill/skill/ws_send.ts --batch --compact
+```
+
+There is also a `batch_execute` command that runs multiple commands server-side in a single WebSocket message:
+```bash
+bun ws_send.ts batch_execute '{"commands":[{"command":"add_node","params":{"node_name":"A","node_type":"Node2D"}},{"command":"add_node","params":{"node_name":"B","node_type":"Sprite2D","parent_path":"A"}}]}'
 ```
 
 ## How to generate assets
 
 Use the asset generator to create sprites, textures, and other images:
 ```bash
-bun /path/to/godot_claude_skill/skill/generate_asset.ts "<prompt>" '{"output":"res://assets/sprite.png","project":"/path/to/project","style":"pixel_art"}'
+bun /path/to/godot_claude_skill/skill/generate_asset.ts "<prompt>" '{"output":"res://assets/sprite.png","project":"/path/to/project","style":"pixel_art","resize":"32x32"}'
 ```
 
-After generating, use `set_sprite_texture` or `create_sprite_frames` to assign the asset to a node in the scene.
+**IMPORTANT**: The generator automatically removes white backgrounds (AI models don't output true alpha). It also trims transparent padding and resizes to game-ready dimensions. Always use `resize` to output at the target size.
+
+### Asset generation options
+- `output` — Output path (res:// or relative) **required**
+- `project` — Godot project root (defaults to cwd)
+- `style` — Style preset name (see below)
+- `resize` — Resize output: `"32x32"`, `"64x64"`, `"128"` (square). **Always set this for game sprites.**
+- `remove_bg` — Remove white background → transparency (default: true)
+- `trim` — Trim transparent padding after bg removal (default: true)
+- `bg_threshold` — White detection threshold 0-255 (default: 240)
+- `count` — Number of variants (1-4, default: 1)
+- `negative` — Additional negative prompt
+- `aspect_ratio` — Aspect ratio for Imagen: `"1:1"`, `"16:9"`, `"4:1"`
 
 ### Asset generation workflow
-1. Generate the image: `bun generate_asset.ts "knight character walking right" '{"output":"res://assets/knight.png","style":"pixel_art","project":"..."}'`
-2. Set import preset for pixel art: `set_texture_import_preset {"texture_path":"res://assets/knight.png","preset":"2d_pixel"}`
-3. Assign to sprite: `set_sprite_texture {"node_path":"Player","texture_path":"res://assets/knight.png"}`
+1. Generate: `bun generate_asset.ts "knight character" '{"output":"res://assets/knight.png","style":"pixel_art_character","resize":"32x32","project":"..."}'`
+2. Set import preset: `set_texture_import_preset {"texture_path":"res://assets/knight.png","preset":"pixel_art"}`
+3. Assign to sprite: `set_sprite_texture {"node_path":"Player/Sprite","texture_path":"res://assets/knight.png"}`
 
-### Style presets for generate_asset.ts
+### Tips for better generation
+- Generate **one subject per image** — avoid "4 items in a row" (AI struggles with counts)
+- Always specify `resize` — raw output is 1024x1024 which needs heavy downscaling
+- Use `"pixel_art_character"` for sprites, `"pixel_art_tileset"` for tiles
+- The universal negative prompt auto-appends "no text, no labels, no watermarks"
+- For spritesheets, use `"spritesheet"` style + `frame_count` and `columns` params in `create_sprite_frames`
+
+### Style presets
 - `pixel_art` — Retro pixel art, crisp pixels, transparent background
-- `pixel_art_character` — Pixel art character sprite, side view
-- `pixel_art_tileset` — Pixel art tileset, top-down, seamless
+- `pixel_art_character` — Single character sprite, centered, black outline
+- `pixel_art_tileset` — Tileset in strict grid, seamless edges
 - `hand_drawn` — Hand-drawn illustration, vibrant colors
 - `realistic` — PBR-ready textures
 - `ui` — Clean flat UI elements, transparent background
-- `tileset` — Seamless tileable patterns
-- `icon` — Game icons, clear silhouette
-- `character` — Character sprites, transparent background
+- `tileset` — Seamless tileable patterns, strict grid
+- `icon` — Game icons, bold silhouette, centered
+- `character` — Character sprites, centered, transparent background
 - `environment` — Game backgrounds, atmospheric
-- `spritesheet` — Multi-frame grid spritesheet
+- `spritesheet` — Horizontal strip of animation frames, evenly spaced
 
-## Available Commands (155 total, 24 categories)
+## Available Commands (156 total, 25 categories)
 
 ### Project (7)
 - `get_project_info` - Get project metadata, file counts, autoloads
@@ -48,7 +81,7 @@ After generating, use `set_sprite_texture` or `create_sprite_frames` to assign t
 ### Scene (9)
 - `get_scene_tree` - Live scene hierarchy of the open scene
 - `get_scene_file_content` - Raw .tscn content. Params: `{"path":"res://main.tscn"}`
-- `create_scene` - Create new scene. Params: `{"path":"res://levels/level1.tscn","root_type":"Node2D"}`
+- `create_scene` - Create and auto-open scene. Params: `{"path":"res://levels/level1.tscn","root_type":"Node2D","open":true}`
 - `open_scene` - Open scene in editor. Params: `{"path":"res://main.tscn"}`
 - `delete_scene` - Delete scene file. Params: `{"path":"res://old.tscn"}`
 - `save_scene` - Save current or to path. Params: `{"path":"res://main.tscn"}`
@@ -79,8 +112,8 @@ After generating, use `set_sprite_texture` or `create_sprite_frames` to assign t
 
 ### Editor (9)
 - `get_editor_errors` - Get compile errors and stack traces
-- `get_editor_screenshot` - Capture editor viewport. Returns base64 PNG
-- `get_game_screenshot` - Capture game viewport while playing. Returns base64 PNG
+- `get_editor_screenshot` - Capture editor viewport. Params: `{"save_path":"res://screenshot.png","max_width":800,"base64":false}` — use `max_width` to downscale, `base64:false` (default) saves to disk only (avoids WebSocket overflow)
+- `get_game_screenshot` - Capture game viewport while playing. Same params as editor screenshot
 - `compare_screenshots` - Visual diff. Params: `{"path_a":"res://a.png","path_b":"res://b.png","threshold":0.01}`
 - `execute_editor_script` - Run GDScript in editor. Params: `{"code":"_result = _editor.get_edited_scene_root().name"}`
 - `get_signals` - Inspect signal connections. Params: `{"node_path":"Player"}`
@@ -174,9 +207,10 @@ After generating, use `set_sprite_texture` or `create_sprite_frames` to assign t
 ### Export (3)
 - `list_export_presets` / `export_project` / `get_export_info`
 
-### Meta (2)
+### Meta (3)
 - `list_commands` - List all available commands
 - `get_version` - Get plugin and Godot version
+- `batch_execute` - Run multiple commands in one request. Params: `{"commands":[{"command":"add_node","params":{"node_name":"A","node_type":"Node2D"}},{"command":"update_property","params":{"node_path":"A","property":"position","value":"Vector2(100,100)"}}]}` — returns `{total, succeeded, failed, results}`
 
 ## Smart Type Parsing
 

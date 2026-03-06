@@ -130,6 +130,7 @@ func _enter_tree() -> void:
 	# Register meta commands
 	_router.register("list_commands", _list_commands)
 	_router.register("get_version", _get_version)
+	_router.register("batch_execute", _router.batch_execute)
 
 	# Connect WebSocket signal
 	_ws.command_received.connect(_on_command)

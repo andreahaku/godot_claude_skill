@@ -59,6 +59,52 @@ func handle(id: String, command: String, params: Dictionary) -> void:
 		_ws.send_response(peer_id, id, true, {"value": result})
 
 
+## Execute multiple commands in a single request.
+## params.commands: Array of {command: String, params: Dictionary}
+## Returns results array with success/error for each command.
+func batch_execute(params: Dictionary) -> Dictionary:
+	var commands: Array = params.get("commands", [])
+	if commands.is_empty():
+		return {"error": "commands array is required and must not be empty", "code": "MISSING_PARAM"}
+
+	var results: Array = []
+	var succeeded: int = 0
+	var failed: int = 0
+
+	for i in commands.size():
+		var cmd_entry = commands[i]
+		if not cmd_entry is Dictionary:
+			results.append({"index": i, "success": false, "error": "Invalid command entry"})
+			failed += 1
+			continue
+
+		var command: String = cmd_entry.get("command", "")
+		var cmd_params: Dictionary = cmd_entry.get("params", {})
+
+		if command == "" or not _handlers.has(command):
+			results.append({"index": i, "command": command, "success": false, "error": "Unknown command: %s" % command})
+			failed += 1
+			continue
+
+		var handler: Callable = _handlers[command]
+		var result = await handler.call(cmd_params)
+
+		if result == null:
+			results.append({"index": i, "command": command, "success": true, "result": {}})
+			succeeded += 1
+		elif result is Dictionary and result.has("error"):
+			results.append({"index": i, "command": command, "success": false, "error": result.get("error")})
+			failed += 1
+		elif result is Dictionary:
+			results.append({"index": i, "command": command, "success": true, "result": result})
+			succeeded += 1
+		else:
+			results.append({"index": i, "command": command, "success": true, "result": {"value": result}})
+			succeeded += 1
+
+	return {"total": commands.size(), "succeeded": succeeded, "failed": failed, "results": results}
+
+
 func get_command_list() -> Array[String]:
 	var cmds: Array[String] = []
 	for cmd in _handlers:

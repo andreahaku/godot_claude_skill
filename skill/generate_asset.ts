@@ -61,6 +61,10 @@ interface GenerateOptions {
   count?: number; // Number of variants
   negative?: string; // Negative prompt
   aspect_ratio?: string; // Aspect ratio for Imagen (e.g., "1:1", "16:9")
+  remove_bg?: boolean; // Remove white/light background → transparency (default: true)
+  bg_threshold?: number; // Background color threshold 0-255 (default: 240)
+  resize?: string; // Resize output, e.g. "32x32", "64x64", "128" (square)
+  trim?: boolean; // Trim transparent padding after bg removal (default: true)
 }
 
 // --- Google Gemini / Imagen Provider ---
@@ -211,6 +215,109 @@ async function generateWithOpenAI(
   return data.data.map((item) => Buffer.from(item.b64_json, "base64"));
 }
 
+// --- Post-processing ---
+
+/**
+ * Post-processes a generated PNG: removes white background via flood-fill,
+ * trims transparent padding, and resizes to target dimensions.
+ * All done in a single Python/PIL call for efficiency.
+ */
+function postProcessImage(
+  pngBuffer: Buffer,
+  opts: { removeBg: boolean; threshold: number; trim: boolean; resize?: string }
+): Buffer {
+  const { execSync } = require("child_process");
+  const { writeFileSync, readFileSync, unlinkSync } = require("fs");
+
+  const tmpIn = `/tmp/_asset_gen_${Date.now()}_in.png`;
+  const tmpOut = `/tmp/_asset_gen_${Date.now()}_out.png`;
+
+  writeFileSync(tmpIn, pngBuffer);
+
+  // Parse resize target
+  let resizeW = 0;
+  let resizeH = 0;
+  if (opts.resize) {
+    const parts = opts.resize.split("x");
+    resizeW = parseInt(parts[0]) || 0;
+    resizeH = parseInt(parts[1] || parts[0]) || resizeW;
+  }
+
+  // Single Python script handles everything (pure PIL, no numpy dependency)
+  const script = `
+import sys
+from PIL import Image
+
+img = Image.open('${tmpIn}').convert('RGBA')
+
+if ${opts.removeBg ? "True" : "False"}:
+    threshold = ${opts.threshold}
+    w, h = img.size
+    pixels = img.load()
+    visited = [[False]*w for _ in range(h)]
+    stack = []
+    # Seed all edge pixels that are white/near-white
+    for x in range(w):
+        for y in [0, h-1]:
+            r, g, b, a = pixels[x, y]
+            if r >= threshold and g >= threshold and b >= threshold:
+                stack.append((x, y))
+                visited[y][x] = True
+    for y in range(h):
+        for x in [0, w-1]:
+            r, g, b, a = pixels[x, y]
+            if r >= threshold and g >= threshold and b >= threshold:
+                if not visited[y][x]:
+                    stack.append((x, y))
+                    visited[y][x] = True
+    # DFS flood fill
+    sys.setrecursionlimit(10000)
+    while stack:
+        cx, cy = stack.pop()
+        r, g, b, a = pixels[cx, cy]
+        pixels[cx, cy] = (r, g, b, 0)
+        for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
+            nx, ny = cx+dx, cy+dy
+            if 0 <= nx < w and 0 <= ny < h and not visited[ny][nx]:
+                r2, g2, b2, a2 = pixels[nx, ny]
+                if r2 >= threshold and g2 >= threshold and b2 >= threshold:
+                    visited[ny][nx] = True
+                    stack.append((nx, ny))
+
+if ${opts.trim ? "True" : "False"}:
+    bbox = img.getbbox()
+    if bbox:
+        img = img.crop(bbox)
+
+resize_w = ${resizeW}
+resize_h = ${resizeH}
+if resize_w > 0 and resize_h > 0:
+    img = img.resize((resize_w, resize_h), Image.NEAREST)
+
+img.save('${tmpOut}', 'PNG')
+`;
+
+  const tmpScript = `/tmp/_asset_gen_${Date.now()}_script.py`;
+  writeFileSync(tmpScript, script);
+
+  try {
+    execSync(`python3 "${tmpScript}"`, {
+      encoding: "utf-8",
+      timeout: 30000,
+    });
+    const result = Buffer.from(readFileSync(tmpOut));
+    return result;
+  } catch (err) {
+    // If post-processing fails, return original
+    console.error(`Warning: post-processing failed: ${err}`);
+    return pngBuffer;
+  } finally {
+    try { unlinkSync(tmpIn); } catch {}
+    try { unlinkSync(tmpOut); } catch {}
+    try { unlinkSync(tmpScript); } catch {}
+  }
+}
+
 // --- Main ---
 
 function resolveOutputPath(
@@ -247,7 +354,19 @@ async function main() {
     console.error("  count   - Number of variants (1-4, default: 1)");
     console.error('  negative - Negative prompt, e.g. "blurry, text"');
     console.error(
-      '  aspect_ratio - Aspect ratio for Imagen, e.g. "1:1", "16:9"\n'
+      '  aspect_ratio - Aspect ratio for Imagen, e.g. "1:1", "16:9"'
+    );
+    console.error(
+      '  resize   - Resize output, e.g. "32x32", "64x64", "128" (square)'
+    );
+    console.error(
+      "  remove_bg - Remove white background → transparency (default: true)"
+    );
+    console.error(
+      "  trim     - Trim transparent padding after bg removal (default: true)"
+    );
+    console.error(
+      "  bg_threshold - White detection threshold 0-255 (default: 240)\n"
     );
     console.error("Environment variables:");
     console.error("  GOOGLE_AI_API_KEY   - Google AI key (Gemini/Imagen)");
@@ -318,6 +437,21 @@ async function main() {
       images = await generateWithOpenAI(prompt, options);
     } else {
       images = await generateWithGemini(prompt, options);
+    }
+
+    // Post-process: background removal, trim, resize
+    const shouldRemoveBg = options.remove_bg !== false;
+    const shouldTrim = options.trim !== false;
+    const bgThreshold = options.bg_threshold ?? 240;
+    if (shouldRemoveBg || options.resize) {
+      for (let i = 0; i < images.length; i++) {
+        images[i] = postProcessImage(images[i], {
+          removeBg: shouldRemoveBg,
+          threshold: bgThreshold,
+          trim: shouldTrim,
+          resize: options.resize,
+        });
+      }
     }
 
     // Save images

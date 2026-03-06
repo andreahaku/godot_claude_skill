@@ -98,7 +98,13 @@ func create_scene(params: Dictionary) -> Dictionary:
 		return {"error": "Failed to save scene: %s" % error_string(err), "code": "SAVE_ERROR"}
 
 	_editor.get_resource_filesystem().scan()
-	return {"path": scene_path, "root_type": root_type}
+
+	# Auto-open the scene unless explicitly disabled
+	var auto_open: bool = params.get("open", true)
+	if auto_open:
+		_editor.open_scene_from_path(scene_path)
+
+	return {"path": scene_path, "root_type": root_type, "opened": auto_open}
 
 
 func open_scene(params: Dictionary) -> Dictionary:
