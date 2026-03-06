@@ -1,0 +1,6 @@
+node_modules/
+.godot/
+*.import
+.env
+.claude_screenshot_*
+.claude_captures/
