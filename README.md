@@ -1,6 +1,6 @@
 # Godot Claude Skill
 
-A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **155 commands across 24 categories** with full undo/redo support and AI asset generation.
+A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **156 commands across 25 categories** with full undo/redo support and AI asset generation.
 
 ## Architecture
 
@@ -10,7 +10,7 @@ A comprehensive Claude Code skill for controlling the Godot game engine editor i
 │                 │   ws://127.0.0.1   │                      │
 │  skill/         │      :9080         │  godot-plugin/       │
 │  ws_send.ts     │                    │  godot_claude.gd     │
-│  generate_asset │  JSON commands     │  24 handlers          │
+│  generate_asset │  JSON commands     │  25 handlers          │
 └─────────────────┘                    └──────────────────────┘
 ```
 
@@ -21,6 +21,7 @@ The plugin runs **inside the Godot editor** as an EditorPlugin with a WebSocket 
 - **Godot 4.6+** (tested with 4.6.1)
 - **Bun** runtime (for the WebSocket client `ws_send.ts`)
 - **Claude Code** CLI
+- **Python 3 + Pillow** (optional, for asset post-processing: `pip install Pillow`)
 - **API key** (optional, for asset generation): Google AI (`GOOGLE_AI_API_KEY`) or OpenAI (`OPENAI_API_KEY`)
 
 ## Setup
@@ -81,7 +82,7 @@ addons/godot_claude_skill/
 3. Find **GodotClaudeSkill** in the list and check **Enable**
 4. Check the **Output** panel — you should see:
    ```
-   [GodotClaude] Ready! 149 commands available on ws://127.0.0.1:9080
+   [GodotClaude] Ready! 156 commands available on ws://127.0.0.1:9080
    ```
 
 If you don't see this message, check:
@@ -102,7 +103,7 @@ mkdir -p .claude/commands
 cp /path/to/godot_claude_skill/.claude/commands/godot.md .claude/commands/godot.md
 ```
 
-This gives Claude Code the `/godot` slash command with full documentation of all 149 commands.
+This gives Claude Code the `/godot` slash command with full documentation of all 156 commands.
 
 #### 3b. Add CLAUDE.md Instructions (optional but recommended)
 
@@ -157,7 +158,7 @@ You: Add a script to the player with basic movement
 Claude: (creates GDScript, attaches it to the player node)
 ```
 
-## Features (24 Categories, 155 Commands)
+## Features (25 Categories, 156 Commands)
 
 | Category | Count | Highlights |
 |---|---|---|
@@ -185,6 +186,7 @@ Claude: (creates GDScript, attaches it to the player node)
 | **Profiling** | 2 | FPS, memory, physics, render metrics |
 | **Asset Management** | 6 | Sprite textures, sprite frames from spritesheets, atlas textures, import presets, NinePatch |
 | **Export** | 3 | Presets, export commands, template info |
+| **Meta** | 3 | List commands, version info, batch execute |
 
 ## Key Features
 
@@ -221,6 +223,30 @@ bun ws_send.ts simulate_sequence '{"steps":[
   {"type":"key","key":"RIGHT","pressed":true},
   {"type":"wait","duration":1.0},
   {"type":"key","key":"SPACE","pressed":true}
+]}'
+```
+
+### Batch & Compact Modes
+
+`ws_send.ts` supports batch execution and compact output for faster workflows:
+
+```bash
+# Compact output — prints OK or FAIL instead of full JSON
+bun skill/ws_send.ts --compact add_node '{"node_name":"Foo","node_type":"Node2D"}'
+# Output: OK
+
+# Batch mode — send multiple commands via stdin (JSONL format)
+printf '{"command":"add_node","params":{"node_name":"A","node_type":"Node2D"}}
+{"command":"add_node","params":{"node_name":"B","node_type":"Sprite2D","parent_path":"A"}}
+' | bun skill/ws_send.ts --batch --compact
+# Output:
+# add_node: OK
+# add_node: OK
+
+# Server-side batch — single WebSocket message, multiple commands
+bun skill/ws_send.ts batch_execute '{"commands":[
+  {"command":"add_node","params":{"node_name":"A","node_type":"Node2D"}},
+  {"command":"update_property","params":{"node_path":"A","property":"position","value":"Vector2(100,200)"}}
 ]}'
 ```
 
@@ -266,6 +292,27 @@ bun skill/generate_asset.ts "wooden panel with ornate border" \
   '{"output":"res://assets/ui/panel.png","project":"/path/to/project","style":"ui"}'
 ```
 
+### Post-Processing Options
+
+Generated images can be automatically post-processed (requires Python 3 with Pillow):
+
+```bash
+# Remove white background, resize to 32x32
+bun skill/generate_asset.ts "pixel art knight" \
+  '{"output":"res://assets/knight.png","project":".","style":"pixel_art_character","remove_bg":true,"resize":"32x32"}'
+
+# Trim whitespace and resize
+bun skill/generate_asset.ts "game icon sword" \
+  '{"output":"res://assets/sword.png","project":".","style":"icon","trim":true,"resize":"64x64"}'
+```
+
+| Option | Type | Description |
+|---|---|---|
+| `remove_bg` | `boolean` | Flood-fill remove white/light background from edges |
+| `bg_threshold` | `number` | Brightness threshold for background removal (0-255, default 240) |
+| `trim` | `boolean` | Trim transparent whitespace around the image |
+| `resize` | `string` | Resize to `WxH` (e.g., `"32x32"`, `"64x64"`) |
+
 ### Full Workflow Example
 
 ```bash
@@ -308,7 +355,7 @@ bun skill/ws_send.ts create_sprite_frames \
 | `GOOGLE_AI_API_KEY` | — | Google AI API key (for Gemini/Imagen) |
 | `OPENAI_API_KEY` | — | OpenAI API key (for DALL-E 3) |
 | `ASSET_GEN_PROVIDER` | auto-detect | `gemini` or `openai` |
-| `GEMINI_IMAGE_MODEL` | `imagen-3.0-generate-001` | Google image model |
+| `GEMINI_IMAGE_MODEL` | `imagen-4.0-generate-001` | Google image model |
 
 ## Command Protocol
 
@@ -393,17 +440,18 @@ Error responses:
 godot_claude_skill/
 ├── .claude/
 │   └── commands/
-│       └── godot.md           # Claude Code skill definition (149 commands documented)
+│       └── godot.md           # Claude Code skill definition (156 commands documented)
 ├── godot-plugin/              # Source files for the Godot EditorPlugin
 │   ├── plugin.cfg
 │   ├── godot_claude.gd        # Main plugin entry point
 │   ├── ws_server.gd           # WebSocket server
 │   ├── command_router.gd      # Command routing
-│   ├── handlers/              # 23 handler files
+│   ├── handlers/              # 23 handler files (one per category)
 │   └── utils/                 # Shared utilities
 ├── skill/
 │   ├── install.sh             # Installation script
-│   └── ws_send.ts             # Bun WebSocket client
+│   ├── ws_send.ts             # Bun WebSocket client (single, batch, compact modes)
+│   └── generate_asset.ts      # AI asset generator (Gemini/Imagen, DALL-E)
 └── README.md
 ```
 
