@@ -84,10 +84,12 @@ async function generateWithGemini(
 
   // Use Imagen API
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:predict?key=${GOOGLE_API_KEY}`;
+  console.error(`Generating with ${GEMINI_MODEL}...`);
 
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(120_000),
     body: JSON.stringify({
       instances: [{ prompt }],
       parameters: {
@@ -135,10 +137,12 @@ async function generateWithGeminiContent(
   const model =
     process.env.GEMINI_CONTENT_MODEL || "gemini-2.5-flash-image";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GOOGLE_API_KEY}`;
+  console.error(`Generating with ${model} (fallback)...`);
 
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(120_000),
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
@@ -189,12 +193,14 @@ async function generateWithOpenAI(
   const validSizes = ["1024x1024", "1024x1792", "1792x1024"];
   const dalleSize = validSizes.includes(size) ? size : "1024x1024";
 
+  console.error(`Generating with DALL-E 3...`);
   const response = await fetch("https://api.openai.com/v1/images/generations", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${OPENAI_API_KEY}`,
     },
+    signal: AbortSignal.timeout(120_000),
     body: JSON.stringify({
       model: "dall-e-3",
       prompt,
@@ -444,6 +450,7 @@ async function main() {
     const shouldTrim = options.trim !== false;
     const bgThreshold = options.bg_threshold ?? 240;
     if (shouldRemoveBg || options.resize) {
+      console.error(`Post-processing ${images.length} image(s)...`);
       for (let i = 0; i < images.length; i++) {
         images[i] = postProcessImage(images[i], {
           removeBg: shouldRemoveBg,

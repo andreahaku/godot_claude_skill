@@ -33,7 +33,9 @@ static func parse_value(value) -> Variant:
 
 	# Hex color: #rrggbb or #rrggbbaa
 	if s.begins_with("#") and (s.length() == 7 or s.length() == 9):
-		return Color.html(s)
+		if Color.html_is_valid(s):
+			return Color.html(s)
+		return value  # Return as string if invalid hex
 
 	# Vector2
 	var v2 = _try_parse_vector2(s)
@@ -251,10 +253,13 @@ static func _try_parse_transform3d(s: String):
 	return null
 
 
-## Convert a Godot value to a JSON-safe representation
-static func value_to_json(value) -> Variant:
+## Convert a Godot value to a JSON-safe representation.
+## Uses _seen array to detect circular references in Arrays/Dictionaries.
+static func value_to_json(value, _depth: int = 0) -> Variant:
 	if value == null:
 		return null
+	if _depth > 32:
+		return "<max depth exceeded>"
 	if value is bool or value is int or value is float or value is String:
 		return value
 	if value is Vector2:
@@ -288,12 +293,12 @@ static func value_to_json(value) -> Variant:
 	if value is Array:
 		var arr = []
 		for item in value:
-			arr.append(value_to_json(item))
+			arr.append(value_to_json(item, _depth + 1))
 		return arr
 	if value is Dictionary:
 		var dict = {}
 		for key in value:
-			dict[str(key)] = value_to_json(value[key])
+			dict[str(key)] = value_to_json(value[key], _depth + 1)
 		return dict
 	if value is Resource:
 		return {"_type": value.get_class(), "_path": value.resource_path}

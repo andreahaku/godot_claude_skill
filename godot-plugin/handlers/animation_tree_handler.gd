@@ -116,7 +116,10 @@ func add_state_machine_state(params: Dictionary) -> Dictionary:
 	else:
 		anim_node = AnimationNodeAnimation.new()
 
-	sm.add_node(state_name, anim_node)
+	_undo.create_action("Add State: %s" % state_name)
+	_undo.add_do_method(sm, &"add_node", [state_name, anim_node])
+	_undo.add_undo_method(sm, &"remove_node", [state_name])
+	_undo.commit_action()
 	return {"state_name": state_name, "animation": animation_name}
 
 
@@ -139,7 +142,11 @@ func remove_state_machine_state(params: Dictionary) -> Dictionary:
 	if not sm.has_node(state_name):
 		return {"error": "State not found: %s" % state_name, "code": "STATE_NOT_FOUND"}
 
-	sm.remove_node(state_name)
+	var old_node = sm.get_node(state_name)
+	_undo.create_action("Remove State: %s" % state_name)
+	_undo.add_do_method(sm, &"remove_node", [state_name])
+	_undo.add_undo_method(sm, &"add_node", [state_name, old_node])
+	_undo.commit_action()
 	return {"removed": state_name}
 
 
@@ -167,7 +174,11 @@ func add_state_machine_transition(params: Dictionary) -> Dictionary:
 	if advance_condition != "":
 		transition.advance_condition = advance_condition
 
-	sm.add_transition(from_state, to_state, transition)
+	_undo.create_action("Add Transition: %s -> %s" % [from_state, to_state])
+	_undo.add_do_method(sm, &"add_transition", [from_state, to_state, transition])
+	# For undo, we need to find and remove this specific transition
+	_undo.add_undo_method(sm, &"remove_transition", [from_state, to_state])
+	_undo.commit_action()
 	return {"from": from_state, "to": to_state, "advance_condition": advance_condition}
 
 
@@ -188,13 +199,21 @@ func remove_state_machine_transition(params: Dictionary) -> Dictionary:
 	if sm == null:
 		return {"error": "State machine not found", "code": "SM_NOT_FOUND"}
 
-	# Find and remove the transition
+	# Find the transition to save for undo
+	var old_transition: AnimationNodeStateMachineTransition = null
 	for i in range(sm.get_transition_count()):
 		if sm.get_transition_from(i) == from_state and sm.get_transition_to(i) == to_state:
-			sm.remove_transition_by_index(i)
-			return {"removed": true, "from": from_state, "to": to_state}
+			old_transition = sm.get_transition(i)
+			break
 
-	return {"error": "Transition not found: %s -> %s" % [from_state, to_state], "code": "TRANSITION_NOT_FOUND"}
+	if old_transition == null:
+		return {"error": "Transition not found: %s -> %s" % [from_state, to_state], "code": "TRANSITION_NOT_FOUND"}
+
+	_undo.create_action("Remove Transition: %s -> %s" % [from_state, to_state])
+	_undo.add_do_method(sm, &"remove_transition", [from_state, to_state])
+	_undo.add_undo_method(sm, &"add_transition", [from_state, to_state, old_transition])
+	_undo.commit_action()
+	return {"removed": true, "from": from_state, "to": to_state}
 
 
 func set_blend_tree_node(params: Dictionary) -> Dictionary:
@@ -234,14 +253,18 @@ func set_blend_tree_node(params: Dictionary) -> Dictionary:
 		_:
 			return {"error": "Unknown blend type: %s" % blend_type, "code": "INVALID_TYPE"}
 
-	bt.add_node(blend_node_name, node)
+	_undo.create_action("Add Blend Tree Node: %s" % blend_node_name)
+	_undo.add_do_method(bt, &"add_node", [blend_node_name, node])
+	_undo.add_undo_method(bt, &"remove_node", [blend_node_name])
 
 	# Optionally connect
 	var connect_to: String = params.get("connect_to", "")
 	var connect_port: int = params.get("connect_port", 0)
 	if connect_to != "":
-		bt.connect_node(connect_to, connect_port, blend_node_name)
+		_undo.add_do_method(bt, &"connect_node", [connect_to, connect_port, blend_node_name])
+		_undo.add_undo_method(bt, &"disconnect_node", [connect_to, connect_port])
 
+	_undo.commit_action()
 	return {"name": blend_node_name, "type": blend_type}
 
 
@@ -257,8 +280,14 @@ func set_tree_parameter(params: Dictionary) -> Dictionary:
 	if tree == null:
 		return {"error": "AnimationTree not found", "code": "NODE_NOT_FOUND"}
 
+	var param_path = "parameters/" + parameter
 	var parsed = TypeParser.parse_value(value)
-	tree.set("parameters/" + parameter, parsed)
+	var old_val = tree.get(param_path)
+
+	_undo.create_action("Set AnimationTree Param: %s" % parameter)
+	_undo.add_do_method(tree, &"set", [param_path, parsed])
+	_undo.add_undo_method(tree, &"set", [param_path, old_val])
+	_undo.commit_action()
 
 	return {"parameter": parameter, "value": TypeParser.value_to_json(parsed)}
 

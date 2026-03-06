@@ -10,6 +10,8 @@ signal command_received(id: String, command: String, params: Dictionary)
 
 const DEFAULT_PORT := 9080
 const HEARTBEAT_INTERVAL := 5.0
+const MAX_CONNECTIONS := 10
+const MAX_MESSAGE_BYTES := 16 * 1024 * 1024  # 16 MB
 
 var _server: TCPServer
 var _peers: Dictionary = {} # peer_id -> StreamPeerTCP
@@ -52,6 +54,11 @@ func poll() -> void:
 	while _server.is_connection_available():
 		var tcp = _server.take_connection()
 		if tcp:
+			if _ws_peers.size() >= MAX_CONNECTIONS:
+				tcp.disconnect_from_host()
+				push_warning("[GodotClaude] Connection rejected: max %d peers reached" % MAX_CONNECTIONS)
+				continue
+
 			var peer_id = _next_peer_id
 			_next_peer_id += 1
 			_peers[peer_id] = tcp
@@ -59,7 +66,7 @@ func poll() -> void:
 			var ws = WebSocketPeer.new()
 			ws.accept_stream(tcp)
 			_ws_peers[peer_id] = ws
-			print("[GodotClaude] New connection: peer_%d" % peer_id)
+			print("[GodotClaude] New connection: peer_%d (%d active)" % [peer_id, _ws_peers.size()])
 
 	# Poll all WebSocket peers
 	var to_remove: Array[int] = []
@@ -70,7 +77,13 @@ func poll() -> void:
 		var state = ws.get_ready_state()
 		if state == WebSocketPeer.STATE_OPEN:
 			while ws.get_available_packet_count() > 0:
-				var data = ws.get_packet().get_string_from_utf8()
+				var packet = ws.get_packet()
+				if packet.size() > MAX_MESSAGE_BYTES:
+					send_response(peer_id, "", false, null,
+						"Message too large: %d bytes (max %d)" % [packet.size(), MAX_MESSAGE_BYTES],
+						"MESSAGE_TOO_LARGE")
+					continue
+				var data = packet.get_string_from_utf8()
 				_handle_message(peer_id, data)
 		elif state == WebSocketPeer.STATE_CLOSING:
 			pass

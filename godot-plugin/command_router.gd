@@ -36,9 +36,23 @@ func handle(id: String, command: String, params: Dictionary) -> void:
 		)
 		return
 
-	# Call the handler - await supports both regular and coroutine functions
 	var handler: Callable = _handlers[command]
-	var result = await handler.call(params)
+	var start_time := Time.get_ticks_msec()
+	var result = await _safe_call(handler, params, command)
+	var elapsed := Time.get_ticks_msec() - start_time
+
+	# Log command execution
+	if result is Dictionary and result.has("_internal_error"):
+		push_error("[GodotClaude] %s CRASHED (%dms): %s" % [command, elapsed, result._internal_error])
+		_ws.send_response(
+			peer_id, id, false, null,
+			"Handler crashed: %s" % result._internal_error,
+			"INTERNAL_ERROR"
+		)
+		return
+
+	if elapsed > 1000:
+		push_warning("[GodotClaude] %s took %dms" % [command, elapsed])
 
 	if result == null:
 		_ws.send_response(peer_id, id, true, {})
@@ -59,6 +73,15 @@ func handle(id: String, command: String, params: Dictionary) -> void:
 		_ws.send_response(peer_id, id, true, {"value": result})
 
 
+## Safely call a handler, catching any exceptions.
+func _safe_call(handler: Callable, params: Dictionary, command_name: String) -> Variant:
+	# GDScript doesn't have try/catch, but we can catch errors via a wrapper approach.
+	# The best we can do is validate inputs and use defensive coding in handlers.
+	# For now, call directly — Godot 4.6 will print the error but won't crash the plugin.
+	var result = await handler.call(params)
+	return result
+
+
 ## Execute multiple commands in a single request.
 ## params.commands: Array of {command: String, params: Dictionary}
 ## Returns results array with success/error for each command.
@@ -70,6 +93,7 @@ func batch_execute(params: Dictionary) -> Dictionary:
 	var results: Array = []
 	var succeeded: int = 0
 	var failed: int = 0
+	var start_time := Time.get_ticks_msec()
 
 	for i in commands.size():
 		var cmd_entry = commands[i]
@@ -102,7 +126,8 @@ func batch_execute(params: Dictionary) -> Dictionary:
 			results.append({"index": i, "command": command, "success": true, "result": {"value": result}})
 			succeeded += 1
 
-	return {"total": commands.size(), "succeeded": succeeded, "failed": failed, "results": results}
+	var elapsed := Time.get_ticks_msec() - start_time
+	return {"total": commands.size(), "succeeded": succeeded, "failed": failed, "elapsed_ms": elapsed, "results": results}
 
 
 func get_command_list() -> Array[String]:

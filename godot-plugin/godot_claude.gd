@@ -103,7 +103,7 @@ func _enter_tree() -> void:
 	_theme_handler = ThemeHandler.new(ei, _undo)
 	_router.register_all(_theme_handler.get_commands())
 
-	_shader_handler = ShaderHandler.new(ei)
+	_shader_handler = ShaderHandler.new(ei, _undo)
 	_router.register_all(_shader_handler.get_commands())
 
 	_resource_handler = ResourceHandler.new(ei)

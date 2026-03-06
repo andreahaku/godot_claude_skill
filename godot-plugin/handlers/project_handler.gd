@@ -101,7 +101,7 @@ func set_project_settings(params: Dictionary) -> Dictionary:
 
 	var err = ProjectSettings.save()
 	if err != OK:
-		return {"error": "Failed to save project settings: %s" % error_string(err), "code": "SAVE_FAILED"}
+		return {"error": "Failed to save project settings: %s" % error_string(err), "code": "SAVE_ERROR"}
 
 	return {"changed": changed, "saved": true}
 

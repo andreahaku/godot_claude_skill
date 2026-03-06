@@ -59,9 +59,16 @@ func set_theme_color(params: Dictionary) -> Dictionary:
 
 	var control: Control = node
 	var color = TypeParser.parse_value(color_value)
-	var type = theme_type if theme_type != "" else control.get_class()
 
-	control.add_theme_color_override(color_name, color)
+	var had_override = control.has_theme_color_override(color_name)
+	_undo.create_action("Set Theme Color: %s" % color_name)
+	_undo.add_do_method(control, &"add_theme_color_override", [color_name, color])
+	if had_override:
+		var old_color = control.get_theme_color(color_name)
+		_undo.add_undo_method(control, &"add_theme_color_override", [color_name, old_color])
+	else:
+		_undo.add_undo_method(control, &"remove_theme_color_override", [color_name])
+	_undo.commit_action()
 	return {"node_path": node_path, "name": color_name, "color": TypeParser.value_to_json(color)}
 
 
@@ -78,7 +85,15 @@ func set_theme_constant(params: Dictionary) -> Dictionary:
 		return {"error": "Control node not found", "code": "NODE_NOT_FOUND"}
 
 	var control: Control = node
-	control.add_theme_constant_override(const_name, value)
+	var had_override = control.has_theme_constant_override(const_name)
+	_undo.create_action("Set Theme Constant: %s" % const_name)
+	_undo.add_do_method(control, &"add_theme_constant_override", [const_name, value])
+	if had_override:
+		var old_val = control.get_theme_constant(const_name)
+		_undo.add_undo_method(control, &"add_theme_constant_override", [const_name, old_val])
+	else:
+		_undo.add_undo_method(control, &"remove_theme_constant_override", [const_name])
+	_undo.commit_action()
 	return {"node_path": node_path, "name": const_name, "value": value}
 
 
@@ -95,7 +110,15 @@ func set_theme_font_size(params: Dictionary) -> Dictionary:
 		return {"error": "Control node not found", "code": "NODE_NOT_FOUND"}
 
 	var control: Control = node
-	control.add_theme_font_size_override(font_name, size)
+	var had_override = control.has_theme_font_size_override(font_name)
+	_undo.create_action("Set Theme Font Size: %s" % font_name)
+	_undo.add_do_method(control, &"add_theme_font_size_override", [font_name, size])
+	if had_override:
+		var old_size = control.get_theme_font_size(font_name)
+		_undo.add_undo_method(control, &"add_theme_font_size_override", [font_name, old_size])
+	else:
+		_undo.add_undo_method(control, &"remove_theme_font_size_override", [font_name])
+	_undo.commit_action()
 	return {"node_path": node_path, "name": font_name, "size": size}
 
 
@@ -138,7 +161,15 @@ func set_theme_stylebox(params: Dictionary) -> Dictionary:
 		style.content_margin_right = content_margin
 		style.content_margin_bottom = content_margin
 
-	control.add_theme_stylebox_override(style_name, style)
+	var had_override = control.has_theme_stylebox_override(style_name)
+	_undo.create_action("Set Theme StyleBox: %s" % style_name)
+	_undo.add_do_method(control, &"add_theme_stylebox_override", [style_name, style])
+	if had_override:
+		var old_style = control.get_theme_stylebox(style_name)
+		_undo.add_undo_method(control, &"add_theme_stylebox_override", [style_name, old_style])
+	else:
+		_undo.add_undo_method(control, &"remove_theme_stylebox_override", [style_name])
+	_undo.commit_action()
 	return {"node_path": node_path, "name": style_name}
 
 

@@ -100,10 +100,11 @@ func set_particle_material(params: Dictionary) -> Dictionary:
 	mat.spread = spread
 	mat.emission_shape = emission_shape
 
-	if node is GPUParticles3D:
-		node.process_material = mat
-	elif node is GPUParticles2D:
-		node.process_material = mat
+	var old_mat = node.process_material
+	_undo.create_action("Set Particle Material")
+	_undo.add_do_method(node, &"set", ["process_material", mat])
+	_undo.add_undo_method(node, &"set", ["process_material", old_mat])
+	_undo.commit_action()
 
 	return {"node_path": node_path, "material_set": true}
 
@@ -141,7 +142,12 @@ func set_particle_color_gradient(params: Dictionary) -> Dictionary:
 
 	var tex = GradientTexture1D.new()
 	tex.gradient = gradient
-	mat.color_ramp = tex
+	var old_ramp = mat.color_ramp
+
+	_undo.create_action("Set Particle Color Gradient")
+	_undo.add_do_method(mat, &"set", ["color_ramp", tex])
+	_undo.add_undo_method(mat, &"set", ["color_ramp", old_ramp])
+	_undo.commit_action()
 
 	return {"node_path": node_path, "stops": stops.size()}
 
@@ -217,10 +223,11 @@ func apply_particle_preset(params: Dictionary) -> Dictionary:
 			return {"error": "Unknown preset: %s" % preset, "code": "INVALID_PRESET",
 				"suggestions": ["Available: fire, smoke, rain, snow, sparks"]}
 
-	if node is GPUParticles3D:
-		node.process_material = mat
-	elif node is GPUParticles2D:
-		node.process_material = mat
+	var old_mat = node.process_material
+	_undo.create_action("Apply Particle Preset: %s" % preset)
+	_undo.add_do_method(node, &"set", ["process_material", mat])
+	_undo.add_undo_method(node, &"set", ["process_material", old_mat])
+	_undo.commit_action()
 
 	return {"node_path": node_path, "preset": preset}
 

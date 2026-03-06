@@ -7,10 +7,12 @@ extends RefCounted
 ## assign_shader_material, set_shader_param, get_shader_params
 
 var _editor: EditorInterface
+var _undo: UndoHelper
 
 
-func _init(editor: EditorInterface):
+func _init(editor: EditorInterface, undo: UndoHelper = null):
 	_editor = editor
+	_undo = undo
 
 
 func get_commands() -> Dictionary:
@@ -163,9 +165,23 @@ func assign_shader_material(params: Dictionary) -> Dictionary:
 	mat.shader = shader
 
 	if node is MeshInstance3D:
-		node.material_override = mat
+		if _undo:
+			var old_mat = node.material_override
+			_undo.create_action("Assign Shader Material")
+			_undo.add_do_method(node, &"set", ["material_override", mat])
+			_undo.add_undo_method(node, &"set", ["material_override", old_mat])
+			_undo.commit_action()
+		else:
+			node.material_override = mat
 	elif node is CanvasItem:
-		node.material = mat
+		if _undo:
+			var old_mat = node.material
+			_undo.create_action("Assign Shader Material")
+			_undo.add_do_method(node, &"set", ["material", mat])
+			_undo.add_undo_method(node, &"set", ["material", old_mat])
+			_undo.commit_action()
+		else:
+			node.material = mat
 	else:
 		return {"error": "Node type doesn't support materials", "code": "WRONG_TYPE"}
 
@@ -193,7 +209,14 @@ func set_shader_param(params: Dictionary) -> Dictionary:
 		return {"error": "Node does not have a ShaderMaterial", "code": "NO_SHADER"}
 
 	var parsed = TypeParser.parse_value(value)
-	mat.set_shader_parameter(param_name, parsed)
+	if _undo:
+		var old_val = mat.get_shader_parameter(param_name)
+		_undo.create_action("Set Shader Param: %s" % param_name)
+		_undo.add_do_method(mat, &"set_shader_parameter", [param_name, parsed])
+		_undo.add_undo_method(mat, &"set_shader_parameter", [param_name, old_val])
+		_undo.commit_action()
+	else:
+		mat.set_shader_parameter(param_name, parsed)
 
 	return {"name": param_name, "value": TypeParser.value_to_json(parsed)}
 
