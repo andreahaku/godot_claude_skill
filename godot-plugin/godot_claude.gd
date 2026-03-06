@@ -34,6 +34,7 @@ var _batch_handler: BatchHandler
 var _testing_handler: TestingHandler
 var _analysis_handler: AnalysisHandler
 var _profiling_handler: ProfilingHandler
+var _asset_handler: AssetHandler
 var _export_handler: ExportHandler
 
 
@@ -119,6 +120,9 @@ func _enter_tree() -> void:
 
 	_profiling_handler = ProfilingHandler.new(ei)
 	_router.register_all(_profiling_handler.get_commands())
+
+	_asset_handler = AssetHandler.new(ei, _undo)
+	_router.register_all(_asset_handler.get_commands())
 
 	_export_handler = ExportHandler.new(ei)
 	_router.register_all(_export_handler.get_commands())

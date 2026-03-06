@@ -1,6 +1,6 @@
 # Godot Claude Skill
 
-A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **149 commands across 23 categories** with full undo/redo support.
+A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **155 commands across 24 categories** with full undo/redo support and AI asset generation.
 
 ## Architecture
 
@@ -10,7 +10,7 @@ A comprehensive Claude Code skill for controlling the Godot game engine editor i
 │                 │   ws://127.0.0.1   │                      │
 │  skill/         │      :9080         │  godot-plugin/       │
 │  ws_send.ts     │                    │  godot_claude.gd     │
-│                 │  JSON commands     │  23 handlers          │
+│  generate_asset │  JSON commands     │  24 handlers          │
 └─────────────────┘                    └──────────────────────┘
 ```
 
@@ -21,6 +21,7 @@ The plugin runs **inside the Godot editor** as an EditorPlugin with a WebSocket 
 - **Godot 4.6+** (tested with 4.6.1)
 - **Bun** runtime (for the WebSocket client `ws_send.ts`)
 - **Claude Code** CLI
+- **API key** (optional, for asset generation): Google AI (`GOOGLE_AI_API_KEY`) or OpenAI (`OPENAI_API_KEY`)
 
 ## Setup
 
@@ -156,7 +157,7 @@ You: Add a script to the player with basic movement
 Claude: (creates GDScript, attaches it to the player node)
 ```
 
-## Features (23 Categories, 149 Commands)
+## Features (24 Categories, 155 Commands)
 
 | Category | Count | Highlights |
 |---|---|---|
@@ -182,6 +183,7 @@ Claude: (creates GDScript, attaches it to the player node)
 | **Testing & QA** | 5 | Automated test scenarios, assertions, stress testing |
 | **Code Analysis** | 6 | Unused resources, signal flow, complexity, circular deps |
 | **Profiling** | 2 | FPS, memory, physics, render metrics |
+| **Asset Management** | 6 | Sprite textures, sprite frames from spritesheets, atlas textures, import presets, NinePatch |
 | **Export** | 3 | Presets, export commands, template info |
 
 ## Key Features
@@ -229,6 +231,84 @@ Inspect and modify the running game in real-time:
 - `monitor_properties` — track property changes over time
 - `execute_game_script` — run arbitrary GDScript in the game context
 - `capture_frames` — multi-frame screenshot capture
+
+## AI Asset Generation
+
+The skill includes an AI-powered asset generator that creates sprites, textures, tilesets, and other game art using image generation APIs.
+
+### Setup
+
+Set one of these environment variables (e.g., in your shell profile or `.env`):
+
+```bash
+# Google AI (Gemini/Imagen) — recommended
+export GOOGLE_AI_API_KEY="your-google-ai-api-key"
+
+# OR OpenAI (DALL-E 3)
+export OPENAI_API_KEY="your-openai-api-key"
+```
+
+Get a Google AI API key at [aistudio.google.com](https://aistudio.google.com/).
+
+### Usage
+
+```bash
+# Generate a pixel art character
+bun skill/generate_asset.ts "knight character, side view, idle pose" \
+  '{"output":"res://assets/sprites/knight.png","project":"/path/to/godot/project","style":"pixel_art"}'
+
+# Generate a tileset
+bun skill/generate_asset.ts "grass and dirt tiles, top-down RPG" \
+  '{"output":"res://assets/tiles/terrain.png","project":"/path/to/project","style":"pixel_art_tileset","size":"1024x1024"}'
+
+# Generate a UI panel background
+bun skill/generate_asset.ts "wooden panel with ornate border" \
+  '{"output":"res://assets/ui/panel.png","project":"/path/to/project","style":"ui"}'
+```
+
+### Full Workflow Example
+
+```bash
+# 1. Generate a character spritesheet
+bun skill/generate_asset.ts "pixel art knight walk cycle, 4 frames, side view" \
+  '{"output":"res://assets/knight_walk.png","project":".","style":"spritesheet"}'
+
+# 2. Set pixel art import settings (no filtering)
+bun skill/ws_send.ts set_texture_import_preset \
+  '{"texture_path":"res://assets/knight_walk.png","preset":"2d_pixel"}'
+
+# 3. Create an AnimatedSprite2D and assign frames from the spritesheet
+bun skill/ws_send.ts add_node \
+  '{"node_type":"AnimatedSprite2D","node_name":"Knight"}'
+
+bun skill/ws_send.ts create_sprite_frames \
+  '{"node_path":"Knight","spritesheet":"res://assets/knight_walk.png","frame_width":32,"frame_height":32,"animation":"walk","fps":8,"loop":true}'
+```
+
+### Style Presets
+
+| Preset | Description |
+|---|---|
+| `pixel_art` | Retro pixel art, crisp pixels, transparent background |
+| `pixel_art_character` | Pixel art character, side view |
+| `pixel_art_tileset` | Pixel art tileset, top-down, seamless |
+| `hand_drawn` | Hand-drawn illustration, vibrant colors |
+| `realistic` | PBR-ready detailed textures |
+| `ui` | Clean flat UI elements, transparent background |
+| `tileset` | Seamless tileable patterns |
+| `icon` | Game icons, clear silhouette |
+| `character` | Character sprites, transparent background |
+| `environment` | Game backgrounds, atmospheric |
+| `spritesheet` | Multi-frame grid spritesheet |
+
+### Environment Variables for Asset Generation
+
+| Variable | Default | Description |
+|---|---|---|
+| `GOOGLE_AI_API_KEY` | — | Google AI API key (for Gemini/Imagen) |
+| `OPENAI_API_KEY` | — | OpenAI API key (for DALL-E 3) |
+| `ASSET_GEN_PROVIDER` | auto-detect | `gemini` or `openai` |
+| `GEMINI_IMAGE_MODEL` | `imagen-3.0-generate-001` | Google image model |
 
 ## Command Protocol
 
