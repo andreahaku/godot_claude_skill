@@ -91,11 +91,24 @@ func _require_bridge() -> Dictionary:
 # ---------------------------------------------------------------------------
 
 func get_bridge_status(params: Dictionary) -> Dictionary:
-	return {
+	# Enable/disable tracing via params
+	if params.has("trace"):
+		_bridge.set_trace_enabled(params["trace"])
+	if params.get("clear_trace", false):
+		_bridge.clear_trace_log()
+
+	var result := {
 		"game_running": _editor.is_playing_scene(),
 		"bridge_connected": _bridge.is_bridge_connected(),
 		"bridge_info": _bridge.get_bridge_info(),
 	}
+
+	# Include trace log when requested
+	if params.get("include_trace", false):
+		var last: int = params.get("trace_last", 0)
+		result["trace_log"] = _bridge.get_trace_log(last)
+
+	return result
 
 
 # ---------------------------------------------------------------------------

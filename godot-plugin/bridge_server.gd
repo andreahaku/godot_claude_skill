@@ -15,6 +15,11 @@ signal bridge_response_received(id: String, result: Dictionary)
 
 const BRIDGE_PORT := 9081
 const REQUEST_TIMEOUT := 10.0  # seconds
+const LONG_TIMEOUT := 60.0  # seconds — for replay, frame capture, etc.
+## Commands that may take longer than the default timeout
+const LONG_RUNNING_COMMANDS: Array[String] = [
+	"bridge_replay_recording", "bridge_simulate_sequence", "bridge_capture_screenshot",
+]
 
 var _server: TCPServer
 var _bridge_peer: WebSocketPeer
@@ -24,6 +29,11 @@ var _is_bridge_connected: bool = false
 var _next_request_id: int = 0
 var _handshake_received: bool = false
 var _bridge_info: Dictionary = {}  # Info from the bridge handshake
+
+# Opt-in tracing for debugging bridge round-trips
+var _trace_enabled: bool = false
+var _trace_log: Array = []  # Array of {command, id, duration_ms, success, error}
+const MAX_TRACE_LOG := 200
 
 
 func start() -> Error:
@@ -108,6 +118,24 @@ func get_bridge_info() -> Dictionary:
 	return _bridge_info.duplicate()
 
 
+func set_trace_enabled(enabled: bool) -> void:
+	_trace_enabled = enabled
+	if enabled:
+		print("[BridgeServer] Command tracing enabled")
+	else:
+		print("[BridgeServer] Command tracing disabled")
+
+
+func get_trace_log(last: int = 0) -> Array:
+	if last > 0 and last < _trace_log.size():
+		return _trace_log.slice(_trace_log.size() - last)
+	return _trace_log.duplicate()
+
+
+func clear_trace_log() -> void:
+	_trace_log.clear()
+
+
 ## Send a command to the game bridge and return the request ID.
 ## Listen for bridge_response_received signal with matching ID to get the result.
 func send_command(command: String, params: Dictionary = {}) -> String:
@@ -143,13 +171,16 @@ func send_command_await(command: String, params: Dictionary = {}) -> Dictionary:
 	if request_id == "":
 		return {"error": "Failed to send command to bridge", "code": "BRIDGE_SEND_FAILED"}
 
-	# Wait for the response signal with matching ID
-	# Use a timeout to avoid waiting forever
-	var timeout_time := Time.get_unix_time_from_system() + REQUEST_TIMEOUT
+	var start_time := Time.get_unix_time_from_system()
+
+	# Use longer timeout for known long-running commands
+	var timeout := LONG_TIMEOUT if command in LONG_RUNNING_COMMANDS else REQUEST_TIMEOUT
+	var timeout_time := start_time + timeout
 	while _pending_requests.has(request_id):
 		if Time.get_unix_time_from_system() > timeout_time:
 			_pending_requests.erase(request_id)
-			return {"error": "Bridge request timed out after %s seconds" % str(REQUEST_TIMEOUT), "code": "BRIDGE_TIMEOUT"}
+			_trace_command(command, request_id, start_time, false, "TIMEOUT")
+			return {"error": "Bridge request timed out after %s seconds" % str(timeout), "code": "BRIDGE_TIMEOUT"}
 		# Yield for one frame so the bridge can receive the response
 		await Engine.get_main_loop().process_frame
 
@@ -158,8 +189,11 @@ func send_command_await(command: String, params: Dictionary = {}) -> Dictionary:
 	if _pending_requests.has(response_key):
 		var result: Dictionary = _pending_requests[response_key]
 		_pending_requests.erase(response_key)
+		_trace_command(command, request_id, start_time, not result.has("error"),
+			result.get("error", ""))
 		return result
 
+	_trace_command(command, request_id, start_time, false, "NO_RESPONSE")
 	return {"error": "No response received from bridge", "code": "BRIDGE_NO_RESPONSE"}
 
 
@@ -229,7 +263,9 @@ func _check_timeouts() -> void:
 		if id.begins_with("_response_"):
 			continue
 		var req: Dictionary = _pending_requests[id]
-		if now - req.get("time", now) > REQUEST_TIMEOUT:
+		var cmd: String = req.get("command", "")
+		var timeout := LONG_TIMEOUT if cmd in LONG_RUNNING_COMMANDS else REQUEST_TIMEOUT
+		if now - req.get("time", now) > timeout:
 			timed_out.append(id)
 
 	for id in timed_out:
@@ -254,3 +290,22 @@ func _fail_pending_requests(reason: String) -> void:
 		var error_result := {"error": reason, "code": "BRIDGE_DISCONNECTED"}
 		_pending_requests["_response_" + id] = error_result
 		bridge_response_received.emit(id, error_result)
+
+
+func _trace_command(command: String, id: String, start_time: float, success: bool, error_msg: String = "") -> void:
+	if not _trace_enabled:
+		return
+
+	var duration_ms := int((Time.get_unix_time_from_system() - start_time) * 1000)
+	var entry := {"command": command, "id": id, "duration_ms": duration_ms, "success": success}
+	if not success and error_msg != "":
+		entry["error"] = error_msg
+
+	_trace_log.append(entry)
+	if _trace_log.size() > MAX_TRACE_LOG:
+		_trace_log.pop_front()
+
+	if success:
+		print("[BridgeTrace] %s #%s OK (%dms)" % [command, id, duration_ms])
+	else:
+		print("[BridgeTrace] %s #%s FAIL (%dms): %s" % [command, id, duration_ms, error_msg])

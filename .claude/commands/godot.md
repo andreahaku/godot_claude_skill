@@ -173,8 +173,8 @@ When the game is running and the runtime bridge is connected, input commands are
 Commands in this category use the runtime bridge architecture: when a BridgeServer is connected (port 9081, injected into running game), commands are routed to the game process for accurate live data. When no bridge is connected, commands fall back to editor tree access.
 
 - `get_game_scene_tree` — Live game hierarchy (runtime_only)
-- `get_game_node_properties` — Runtime property values. Params: `node_path` (str) (runtime_only)
-- `set_game_node_properties` — Tweak at runtime. Params: `node_path` (str), `properties` (dict) (runtime_only)
+- `get_game_node_properties` — Runtime property values. Params: `node_path` (str), `properties` (array, optional — whitelist of property names), `mode` (str, optional — `"all"` (default), `"gameplay"` (script vars + transform), `"transform"`, `"physics"`, `"ui"`), `exclude_defaults` (bool, default false) (runtime_only)
+- `set_game_node_properties` — Tweak at runtime. Params: `node_path` (str), `properties` (dict), `verify_after_write` (bool, default false — re-read after delay to detect game logic overwriting), `verify_delay` (float, default 0.1). When verify is enabled, each changed property returns `applied`, `verified`, `current_value`, and `overwritten_after_write`. (runtime_only)
 - `execute_game_script` — Run code in live game. Params: `code` (str) (runtime_only)
 - `capture_frames` — Multi-frame screenshots. Params: `count` (int), `interval` (float) (runtime_only)
 - `monitor_properties` — Property timeline. Params: `node_path` (str), `properties` (array), `duration` (float) (runtime_only)
@@ -184,7 +184,7 @@ Commands in this category use the runtime bridge architecture: when a BridgeServ
 - `click_button_by_text` — Click button. Params: `text` (str) (runtime_only)
 - `wait_for_node` — Wait for node. Params: `node_path` (str), `timeout` (float, default 5.0) (runtime_only)
 - `batch_get_properties` — Bulk read. Params: `queries` (array of {node_path, properties}) (runtime_only)
-- `get_bridge_status` — Check bridge connection status and capabilities
+- `get_bridge_status` — Check bridge connection status. Params: `trace` (bool, optional — enable/disable command tracing), `include_trace` (bool, optional — include trace log in response), `trace_last` (int, optional — last N entries), `clear_trace` (bool, optional — clear trace log)
 - `start_recording` — Start input recording on the game side via bridge. Params: `max_events` (int, default 10000), `max_duration` (float, default 300.0). Captures key, mouse, joypad, and action events with timestamps. Requires runtime bridge.
 - `stop_recording` — Stop recording and return captured events. Returns `events_data` array for replay.
 - `replay_recording` — Replay recorded input in the running game. Params: `events` (array — from stop_recording's events_data; defaults to last recording if omitted), `speed` (float, default 1.0). Requires runtime bridge.
@@ -306,17 +306,21 @@ Commands in this category use the runtime bridge architecture: when a BridgeServ
 Uses the runtime bridge when connected for live game testing.
 
 - `run_test_scenario` — Run scripted test sequence. Params: `name` (str), `steps` (array of step objects), `timeout` (float, optional)
-  - **Step types**:
+  - **Step types** (14):
     - `wait` — Pause. Params: `duration` (float, seconds)
     - `input_action` — Trigger input action. Params: `action` (str), `pressed` (bool), `strength` (float)
     - `input_key` — Keyboard input. Params: `key` (str), `pressed` (bool)
     - `click_ui` — Click UI element. Params: `text` (str)
     - `assert_property` — Assert node property value. Params: `node_path` (str), `property` (str), `operator` (str), `expected` (any)
+    - `assert_property_range` — Assert property is within range. Params: `node_path` (str), `property` (str), `min` (float), `max` (float). Works with nested properties like `position.x`.
     - `assert_exists` — Assert node exists. Params: `node_path` (str)
     - `assert_text` — Assert text visible in UI. Params: `text` (str), `exact` (bool)
+    - `assert_node_count` — Assert count of nodes by type or group. Params: `type` (str) or `group` (str), `expected` (int), `operator` (str, default "==")
     - `assert_signal_emitted` — Assert a signal was emitted. Params: `node_path` (str), `signal_name` (str)
     - `assert_scene` — Assert current scene path. Params: `scene_path` (str)
     - `capture_snapshot` — Capture screenshot during test. Params: `label` (str)
+    - `wait_for_property` — Poll until property meets condition. Params: `node_path` (str), `property` (str), `expected` (any), `operator` (str, default "=="), `timeout` (float, default 5.0), `interval` (float, default 0.1)
+    - `wait_for_text` — Poll until text appears in UI. Params: `text` (str), `exact` (bool), `timeout` (float, default 5.0), `interval` (float, default 0.2)
   - **Assertion operators**: `==`, `!=`, `>`, `>=`, `<`, `<=`, `contains`, `matches` (regex), `approx`
 - `assert_node_state` — Assert properties match. Params: `node_path` (str), `assertions` (dict — key:value or key:{operator, value})
 - `assert_screen_text` — Find text in running game UI. Params: `text` (str), `exact` (bool)
