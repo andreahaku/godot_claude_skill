@@ -170,6 +170,8 @@ func _handle_message(data: String) -> void:
 			result = await _bridge_simulate_sequence(params)
 		"bridge_replay_recording":
 			result = await _bridge_replay_recording(params)
+		"bridge_set_node_properties":
+			result = await _set_node_properties(params)
 		_:
 			result = _handle_command(command, params)
 	_send_response(id, result)
@@ -181,8 +183,6 @@ func _handle_command(command: String, params: Dictionary) -> Dictionary:
 			return _get_scene_tree(params)
 		"bridge_get_node_properties":
 			return _get_node_properties(params)
-		"bridge_set_node_properties":
-			return _set_node_properties(params)
 		"bridge_find_ui_elements":
 			return _find_ui_elements(params)
 		"bridge_click_button":
@@ -258,12 +258,38 @@ func _get_node_properties(params: Dictionary) -> Dictionary:
 	if node == null:
 		return {"error": "Node not found: %s" % node_path, "code": "NODE_NOT_FOUND"}
 
+	# Filtering options
+	var whitelist: Array = params.get("properties", [])
+	var mode: String = params.get("mode", "all")
+	var exclude_defaults: bool = params.get("exclude_defaults", false)
+
+	# Mode-based property sets
+	var mode_properties: Array = _get_mode_properties(mode, node)
+
 	var props: Dictionary = {}
 	for prop in node.get_property_list():
-		if prop.usage & PROPERTY_USAGE_EDITOR or prop.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
-			props[prop.name] = _value_to_json(node.get(prop.name))
+		if not (prop.usage & PROPERTY_USAGE_EDITOR or prop.usage & PROPERTY_USAGE_SCRIPT_VARIABLE):
+			continue
 
-	return {"node_path": node_path, "properties": props}
+		# Whitelist filter: if provided, only include listed properties
+		if not whitelist.is_empty() and prop.name not in whitelist:
+			continue
+
+		# Mode filter: if not "all", only include mode-relevant properties
+		if mode != "all" and not mode_properties.is_empty() and prop.name not in mode_properties:
+			continue
+
+		var value = node.get(prop.name)
+
+		# Exclude defaults: skip properties at their default value
+		if exclude_defaults:
+			var default_val = ClassDB.class_get_property_default_value(node.get_class(), prop.name)
+			if _values_equal(value, default_val):
+				continue
+
+		props[prop.name] = _value_to_json(value)
+
+	return {"node_path": node_path, "properties": props, "mode": mode, "property_count": props.size()}
 
 
 func _set_node_properties(params: Dictionary) -> Dictionary:
@@ -280,12 +306,25 @@ func _set_node_properties(params: Dictionary) -> Dictionary:
 	if node == null:
 		return {"error": "Node not found: %s" % node_path, "code": "NODE_NOT_FOUND"}
 
+	var verify: bool = params.get("verify_after_write", false)
+	var verify_delay: float = params.get("verify_delay", 0.1)
+
 	var changed: Dictionary = {}
 	for key in properties:
 		var old_val = node.get(key)
 		var new_val = _parse_value(properties[key])
 		node.set(key, new_val)
-		changed[key] = {"old": _value_to_json(old_val), "new": _value_to_json(new_val)}
+		changed[key] = {"old": _value_to_json(old_val), "new": _value_to_json(new_val), "applied": true}
+
+	# Verify values after a short delay (catches game logic overwriting)
+	if verify and not changed.is_empty():
+		await get_tree().create_timer(verify_delay).timeout
+		for key in changed:
+			var current_val = node.get(key)
+			var intended_val = _parse_value(properties[key])
+			changed[key]["verified"] = true
+			changed[key]["current_value"] = _value_to_json(current_val)
+			changed[key]["overwritten_after_write"] = not _values_equal(current_val, intended_val)
 
 	return {"node_path": node_path, "changed": changed}
 
@@ -456,6 +495,59 @@ func _get_output_log(params: Dictionary) -> Dictionary:
 		"note": "Direct log capture is not available in the game process. Print output goes to the editor's Output panel. Use the editor-side get_editor_errors command instead.",
 		"limitation": true,
 	}
+
+
+# ---------------------------------------------------------------------------
+# Property filtering helpers
+# ---------------------------------------------------------------------------
+
+func _get_mode_properties(mode: String, node: Node) -> Array:
+	match mode:
+		"transform":
+			if node is Node2D:
+				return ["position", "rotation", "scale", "global_position", "global_rotation", "global_scale", "skew"]
+			elif node is Node3D:
+				return ["position", "rotation", "scale", "global_position", "global_rotation", "global_transform", "basis", "quaternion"]
+			elif node is Control:
+				return ["position", "size", "rotation", "scale", "pivot_offset", "global_position", "anchor_left", "anchor_top", "anchor_right", "anchor_bottom"]
+			return ["position", "rotation", "scale"]
+		"gameplay":
+			# Script variables + common gameplay properties
+			var props: Array = []
+			for prop in node.get_property_list():
+				if prop.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
+					props.append(prop.name)
+			# Also include transform basics
+			props.append_array(["position", "global_position", "rotation", "visible"])
+			return props
+		"physics":
+			return ["velocity", "position", "global_position", "rotation", "mass", "gravity_scale",
+				"linear_velocity", "angular_velocity", "linear_damp", "angular_damp",
+				"collision_layer", "collision_mask", "floor_max_angle", "floor_snap_length"]
+		"ui":
+			return ["position", "size", "visible", "modulate", "self_modulate", "text",
+				"placeholder_text", "tooltip_text", "focus_mode", "mouse_filter",
+				"theme", "custom_minimum_size", "layout_direction", "anchors_preset"]
+		"all", "":
+			return []  # Empty means no filtering
+		_:
+			return []
+
+
+func _values_equal(a, b) -> bool:
+	if a == b:
+		return true
+	if a is float and b is float:
+		return abs(a - b) < 0.0001
+	if a is int and b is float:
+		return abs(float(a) - b) < 0.0001
+	if a is float and b is int:
+		return abs(a - float(b)) < 0.0001
+	if a is Vector2 and b is Vector2:
+		return a.distance_to(b) < 0.0001
+	if a is Vector3 and b is Vector3:
+		return a.distance_to(b) < 0.0001
+	return false
 
 
 # ---------------------------------------------------------------------------

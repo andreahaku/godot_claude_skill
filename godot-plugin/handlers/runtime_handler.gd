@@ -128,7 +128,16 @@ func get_game_node_properties(params: Dictionary) -> Dictionary:
 	if node_path == "":
 		return {"error": "node_path parameter is required", "code": "MISSING_PARAM"}
 
-	return await _bridge.send_command_await("bridge_get_node_properties", {"node_path": node_path})
+	var bridge_params: Dictionary = {"node_path": node_path}
+	# Pass through filtering options
+	if params.has("properties"):
+		bridge_params["properties"] = params["properties"]
+	if params.has("mode"):
+		bridge_params["mode"] = params["mode"]
+	if params.has("exclude_defaults"):
+		bridge_params["exclude_defaults"] = params["exclude_defaults"]
+
+	return await _bridge.send_command_await("bridge_get_node_properties", bridge_params)
 
 
 func set_game_node_properties(params: Dictionary) -> Dictionary:
@@ -143,10 +152,16 @@ func set_game_node_properties(params: Dictionary) -> Dictionary:
 	if node_path == "" or properties.is_empty():
 		return {"error": "node_path and properties are required", "code": "MISSING_PARAM"}
 
-	return await _bridge.send_command_await("bridge_set_node_properties", {
+	var bridge_params: Dictionary = {
 		"node_path": node_path,
 		"properties": properties,
-	})
+	}
+	# Pass through verification options
+	if params.get("verify_after_write", false):
+		bridge_params["verify_after_write"] = true
+		bridge_params["verify_delay"] = params.get("verify_delay", 0.1)
+
+	return await _bridge.send_command_await("bridge_set_node_properties", bridge_params)
 
 
 func execute_game_script(params: Dictionary) -> Dictionary:
@@ -431,12 +446,27 @@ func _fallback_get_game_node_properties(params: Dictionary) -> Dictionary:
 	if node == null:
 		return {"error": "Node not found: %s" % node_path, "code": "NODE_NOT_FOUND"}
 
+	var whitelist: Array = params.get("properties", [])
+	var mode: String = params.get("mode", "all")
+	var exclude_defaults: bool = params.get("exclude_defaults", false)
+	var mode_properties: Array = _get_mode_properties(mode, node)
+
 	var props: Dictionary = {}
 	for prop in node.get_property_list():
-		if prop.usage & PROPERTY_USAGE_EDITOR or prop.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
-			props[prop.name] = TypeParser.value_to_json(node.get(prop.name))
+		if not (prop.usage & PROPERTY_USAGE_EDITOR or prop.usage & PROPERTY_USAGE_SCRIPT_VARIABLE):
+			continue
+		if not whitelist.is_empty() and prop.name not in whitelist:
+			continue
+		if mode != "all" and not mode_properties.is_empty() and prop.name not in mode_properties:
+			continue
+		var value = node.get(prop.name)
+		if exclude_defaults:
+			var default_val = ClassDB.class_get_property_default_value(node.get_class(), prop.name)
+			if TypeParser.value_to_json(value) == TypeParser.value_to_json(default_val):
+				continue
+		props[prop.name] = TypeParser.value_to_json(value)
 
-	return {"node_path": node_path, "properties": props, "_fallback": true}
+	return {"node_path": node_path, "properties": props, "mode": mode, "property_count": props.size(), "_fallback": true}
 
 
 func _fallback_set_game_node_properties(params: Dictionary) -> Dictionary:
@@ -453,12 +483,24 @@ func _fallback_set_game_node_properties(params: Dictionary) -> Dictionary:
 	if node == null:
 		return {"error": "Node not found: %s" % node_path, "code": "NODE_NOT_FOUND"}
 
+	var verify: bool = params.get("verify_after_write", false)
+	var verify_delay: float = params.get("verify_delay", 0.1)
+
 	var changed: Dictionary = {}
 	for key in properties:
 		var old_val = node.get(key)
 		var new_val = TypeParser.parse_value(properties[key])
 		node.set(key, new_val)
-		changed[key] = {"old": TypeParser.value_to_json(old_val), "new": TypeParser.value_to_json(new_val)}
+		changed[key] = {"old": TypeParser.value_to_json(old_val), "new": TypeParser.value_to_json(new_val), "applied": true}
+
+	if verify and not changed.is_empty():
+		await Engine.get_main_loop().create_timer(verify_delay).timeout
+		for key in changed:
+			var current_val = node.get(key)
+			var intended_val = TypeParser.parse_value(properties[key])
+			changed[key]["verified"] = true
+			changed[key]["current_value"] = TypeParser.value_to_json(current_val)
+			changed[key]["overwritten_after_write"] = not _values_equal_fallback(current_val, intended_val)
 
 	return {"node_path": node_path, "changed": changed, "_fallback": true}
 
@@ -576,6 +618,57 @@ func _fallback_wait_for_node(params: Dictionary) -> Dictionary:
 		elapsed += 0.1
 
 	return {"found": false, "timeout": timeout, "_fallback": true}
+
+
+# ---------------------------------------------------------------------------
+# Property filtering helpers (mirrors runtime_bridge.gd logic for fallback)
+# ---------------------------------------------------------------------------
+
+func _get_mode_properties(mode: String, node: Node) -> Array:
+	match mode:
+		"transform":
+			if node is Node2D:
+				return ["position", "rotation", "scale", "global_position", "global_rotation", "global_scale", "skew"]
+			elif node is Node3D:
+				return ["position", "rotation", "scale", "global_position", "global_rotation", "global_transform", "basis", "quaternion"]
+			elif node is Control:
+				return ["position", "size", "rotation", "scale", "pivot_offset", "global_position", "anchor_left", "anchor_top", "anchor_right", "anchor_bottom"]
+			return ["position", "rotation", "scale"]
+		"gameplay":
+			var props: Array = []
+			for prop in node.get_property_list():
+				if prop.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
+					props.append(prop.name)
+			props.append_array(["position", "global_position", "rotation", "visible"])
+			return props
+		"physics":
+			return ["velocity", "position", "global_position", "rotation", "mass", "gravity_scale",
+				"linear_velocity", "angular_velocity", "linear_damp", "angular_damp",
+				"collision_layer", "collision_mask", "floor_max_angle", "floor_snap_length"]
+		"ui":
+			return ["position", "size", "visible", "modulate", "self_modulate", "text",
+				"placeholder_text", "tooltip_text", "focus_mode", "mouse_filter",
+				"theme", "custom_minimum_size", "layout_direction", "anchors_preset"]
+		"all", "":
+			return []
+		_:
+			return []
+
+
+func _values_equal_fallback(a, b) -> bool:
+	if a == b:
+		return true
+	if a is float and b is float:
+		return abs(a - b) < 0.0001
+	if a is int and b is float:
+		return abs(float(a) - b) < 0.0001
+	if a is float and b is int:
+		return abs(a - float(b)) < 0.0001
+	if a is Vector2 and b is Vector2:
+		return a.distance_to(b) < 0.0001
+	if a is Vector3 and b is Vector3:
+		return a.distance_to(b) < 0.0001
+	return false
 
 
 # ---------------------------------------------------------------------------

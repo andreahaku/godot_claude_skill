@@ -6,6 +6,12 @@ extends RefCounted
 ## run_test_scenario, assert_node_state, assert_screen_text,
 ## run_stress_test, get_test_report
 ##
+## Test scenario step types (14):
+## wait, input_action, input_key, click_ui, assert_property,
+## assert_property_range, assert_exists, assert_text, assert_node_count,
+## assert_signal_emitted, assert_scene, capture_snapshot,
+## wait_for_property, wait_for_text
+##
 ## When the runtime bridge is connected, assertions and interactions are routed
 ## through BridgeServer.send_command_await() for true game-side evaluation.
 ## When the bridge is not connected, falls back to the editor tree.
@@ -72,16 +78,24 @@ func run_test_scenario(params: Dictionary) -> Dictionary:
 				result.merge(await _step_click_ui(step))
 			"assert_property":
 				result.merge(await _step_assert_property(step))
+			"assert_property_range":
+				result.merge(await _step_assert_property_range(step))
 			"assert_exists":
 				result.merge(await _step_assert_exists(step))
 			"assert_text":
 				result.merge(await _step_assert_text(step))
+			"assert_node_count":
+				result.merge(await _step_assert_node_count(step))
 			"assert_signal_emitted":
 				result.merge(await _step_assert_signal_emitted(step))
 			"assert_scene":
 				result.merge(await _step_assert_scene(step))
 			"capture_snapshot":
 				result.merge(await _step_capture_snapshot(step))
+			"wait_for_property":
+				result.merge(await _step_wait_for_property(step))
+			"wait_for_text":
+				result.merge(await _step_wait_for_text(step))
 			_:
 				result["status"] = "skip"
 				result["error"] = "Unknown step type: %s" % step_type
@@ -398,6 +412,171 @@ func _step_capture_snapshot(step: Dictionary) -> Dictionary:
 	return {"status": "pass", "snapshot_name": snap_name, "snapshot": snapshot}
 
 
+func _step_assert_property_range(step: Dictionary) -> Dictionary:
+	var node_path: String = step.get("node_path", "")
+	var property_path: String = step.get("property", "")
+	var min_val: float = step.get("min", 0.0)
+	var max_val: float = step.get("max", 0.0)
+
+	if node_path == "" or property_path == "":
+		return {"status": "fail", "error": "node_path and property are required"}
+
+	var actual: float
+	if _bridge.is_bridge_connected():
+		var result := await _bridge.send_command_await("bridge_get_node_properties", {"node_path": node_path})
+		if result.has("error"):
+			return {"status": "fail", "error": result["error"], "bridge": true}
+		var props: Dictionary = result.get("properties", {})
+		actual = _to_float(_get_nested_from_dict(props, property_path))
+	else:
+		var root := _get_editor_or_game_root()
+		if root == null:
+			return {"status": "fail", "error": "No scene available"}
+		var node = root.get_node_or_null(node_path)
+		if node == null:
+			return {"status": "fail", "error": "Node not found: %s" % node_path}
+		actual = _to_float(_get_nested_property(node, property_path))
+
+	var in_range: bool = actual >= min_val and actual <= max_val
+	return {
+		"status": "pass" if in_range else "fail",
+		"property": property_path,
+		"actual": actual,
+		"min": min_val,
+		"max": max_val,
+		"in_range": in_range,
+	}
+
+
+func _step_assert_node_count(step: Dictionary) -> Dictionary:
+	var type_name: String = step.get("type", "")
+	var group_name: String = step.get("group", "")
+	var expected: int = step.get("expected", -1)
+	var operator: String = step.get("operator", "==")
+
+	if type_name == "" and group_name == "":
+		return {"status": "fail", "error": "type or group is required"}
+
+	var count: int = 0
+	if _bridge.is_bridge_connected():
+		var result := await _bridge.send_command_await("bridge_get_scene_tree", {})
+		if result.has("error"):
+			return {"status": "fail", "error": result["error"], "bridge": true}
+		var tree_data: Dictionary = result.get("tree", {})
+		if type_name != "":
+			count = _count_nodes_by_type(tree_data, type_name)
+		# Group counting requires game-side execution
+		if group_name != "":
+			var script_result := await _bridge.send_command_await("bridge_execute_script", {
+				"code": "_result = _tree.get_nodes_in_group(\"%s\").size()" % group_name
+			})
+			if not script_result.has("error"):
+				count = int(script_result.get("result", 0))
+	else:
+		var root := _get_editor_or_game_root()
+		if root == null:
+			return {"status": "fail", "error": "No scene available"}
+		if type_name != "":
+			count = _count_nodes_of_type(root, type_name, 0, MAX_TREE_DEPTH)
+		elif group_name != "":
+			var tree := _get_scene_tree()
+			if tree:
+				count = tree.get_nodes_in_group(group_name).size()
+
+	if expected < 0:
+		return {"status": "pass", "count": count, "type": type_name, "group": group_name}
+
+	var eval_result := _evaluate_assertion(count, expected, operator)
+	return {
+		"status": "pass" if eval_result.get("pass", false) else "fail",
+		"count": count,
+		"expected": expected,
+		"operator": operator,
+		"type": type_name,
+		"group": group_name,
+	}
+
+
+func _step_wait_for_property(step: Dictionary) -> Dictionary:
+	var node_path: String = step.get("node_path", "")
+	var property_path: String = step.get("property", "")
+	var expected = step.get("expected")
+	var operator: String = step.get("operator", "==")
+	var timeout: float = step.get("timeout", 5.0)
+	var poll_interval: float = step.get("interval", 0.1)
+
+	if node_path == "" or property_path == "":
+		return {"status": "fail", "error": "node_path and property are required"}
+
+	var elapsed: float = 0.0
+	while elapsed < timeout:
+		var actual
+		if _bridge.is_bridge_connected():
+			var result := await _bridge.send_command_await("bridge_get_node_properties", {"node_path": node_path})
+			if not result.has("error"):
+				var props: Dictionary = result.get("properties", {})
+				actual = _get_nested_from_dict(props, property_path)
+		else:
+			var root := _get_editor_or_game_root()
+			if root:
+				var node = root.get_node_or_null(node_path)
+				if node:
+					actual = _get_nested_property(node, property_path)
+
+		if actual != null:
+			var eval_result := _evaluate_assertion(actual, expected, operator)
+			if eval_result.get("pass", false):
+				return {"status": "pass", "property": property_path, "actual": actual, "waited": elapsed}
+
+		await _get_scene_tree().create_timer(poll_interval).timeout
+		elapsed += poll_interval
+
+	return {"status": "fail", "property": property_path, "expected": expected, "operator": operator, "timeout": timeout,
+		"error": "Property did not reach expected value within timeout"}
+
+
+func _step_wait_for_text(step: Dictionary) -> Dictionary:
+	var text: String = step.get("text", "")
+	var exact: bool = step.get("exact", false)
+	var timeout: float = step.get("timeout", 5.0)
+	var poll_interval: float = step.get("interval", 0.2)
+
+	if text == "":
+		return {"status": "fail", "error": "text is required"}
+
+	var elapsed: float = 0.0
+	while elapsed < timeout:
+		var found: bool = false
+		if _bridge.is_bridge_connected():
+			var result := await _bridge.send_command_await("bridge_find_ui_elements", {})
+			if not result.has("error"):
+				for el in result.get("elements", []):
+					var el_text: String = str(el.get("text", ""))
+					if el_text == "":
+						continue
+					if exact and el_text == text:
+						found = true
+						break
+					elif not exact and el_text.to_lower().contains(text.to_lower()):
+						found = true
+						break
+		else:
+			var root := _get_editor_or_game_root()
+			if root:
+				var matches: Array = []
+				_find_text_in_controls(root, text, exact, matches, 0, MAX_TREE_DEPTH)
+				found = not matches.is_empty()
+
+		if found:
+			return {"status": "pass", "text": text, "waited": elapsed}
+
+		await _get_scene_tree().create_timer(poll_interval).timeout
+		elapsed += poll_interval
+
+	return {"status": "fail", "text": text, "timeout": timeout,
+		"error": "Text '%s' not found within timeout" % text}
+
+
 # ---------------------------------------------------------------------------
 # assert_node_state (standalone command)
 # ---------------------------------------------------------------------------
@@ -704,17 +883,49 @@ func _get_nested_from_dict(dict: Dictionary, property_path: String) -> Variant:
 			return null
 		if value is Dictionary:
 			value = value.get(parts[i])
+		elif value is String:
+			# Bridge serializes vectors/colors as strings like "Vector2(100, 200)"
+			value = _extract_component_from_serialized(value, parts[i])
 		else:
-			# Try component access on serialized types (e.g., {"x": 1, "y": 2})
-			match parts[i]:
-				"x", "y", "z", "w", "r", "g", "b", "a":
-					if value is Dictionary:
-						value = value.get(parts[i])
-					else:
-						value = null
-				_:
-					value = null
+			value = null
 	return value
+
+
+## Extract a named component (x, y, z, w, r, g, b, a) from a serialized
+## type string like "Vector2(100, 200)" or "Color(1, 0, 0, 1)".
+func _extract_component_from_serialized(serialized: String, component: String) -> Variant:
+	var s := serialized.strip_edges()
+
+	# Map component name to positional index within the constructor args
+	var component_indices := {
+		"Vector2": {"x": 0, "y": 1},
+		"Vector2i": {"x": 0, "y": 1},
+		"Vector3": {"x": 0, "y": 1, "z": 2},
+		"Vector3i": {"x": 0, "y": 1, "z": 2},
+		"Vector4": {"x": 0, "y": 1, "z": 2, "w": 3},
+		"Color": {"r": 0, "g": 1, "b": 2, "a": 3},
+		"Quaternion": {"x": 0, "y": 1, "z": 2, "w": 3},
+	}
+
+	for type_name in component_indices:
+		if not s.begins_with(type_name + "(") or not s.ends_with(")"):
+			continue
+		var indices: Dictionary = component_indices[type_name]
+		if not indices.has(component):
+			return null
+		var inner := s.substr(type_name.length() + 1, s.length() - type_name.length() - 2)
+		var args := inner.split(",")
+		var idx: int = indices[component]
+		if idx >= args.size():
+			return null
+		var val_str := args[idx].strip_edges()
+		if val_str.is_valid_float():
+			return val_str.to_float()
+		if val_str.is_valid_int():
+			return float(val_str.to_int())
+		return null
+
+	return null
 
 
 # ---------------------------------------------------------------------------
@@ -779,4 +990,24 @@ func _count_nodes(node: Node, depth: int, max_depth: int) -> int:
 	var count: int = 1
 	for child in node.get_children():
 		count += _count_nodes(child, depth + 1, max_depth)
+	return count
+
+
+func _count_nodes_of_type(node: Node, type_name: String, depth: int, max_depth: int) -> int:
+	if depth >= max_depth:
+		return 0
+	var count: int = 0
+	if node.get_class() == type_name or node.is_class(type_name):
+		count = 1
+	for child in node.get_children():
+		count += _count_nodes_of_type(child, type_name, depth + 1, max_depth)
+	return count
+
+
+func _count_nodes_by_type(tree_dict: Dictionary, type_name: String) -> int:
+	var count: int = 0
+	if tree_dict.get("type", "") == type_name:
+		count = 1
+	for child in tree_dict.get("children", []):
+		count += _count_nodes_by_type(child, type_name)
 	return count
