@@ -1,6 +1,6 @@
 # Godot Claude Skill
 
-A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **174 commands across 26 categories** with full undo/redo support, AI asset/audio generation, runtime bridge for true game introspection, and structured script patching.
+A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **185 commands across 27 categories** with full undo/redo support, AI asset/audio generation, runtime bridge for true game introspection, event subscriptions, and structured script patching.
 
 ## Architecture
 
@@ -11,7 +11,7 @@ A comprehensive Claude Code skill for controlling the Godot game engine editor i
 │  skill/         │     :9080          │  godot-plugin/       │
 │  ws_send.ts     │                    │  godot_claude.gd     │
 │  generate_asset │  JSON commands     │  command_router.gd   │
-│  generate_audio │                    │  25 handlers         │
+│  generate_audio │                    │  26 handlers         │
 └─────────────────┘                    │  bridge_server.gd    │
                                        └──────────┬───────────┘
                                                    │ ws://127.0.0.1:9081
@@ -76,7 +76,7 @@ addons/godot_claude_skill/
 ├── godot_claude.gd         # Main EditorPlugin entry point
 ├── ws_server.gd            # WebSocket server (TCPServer + WebSocketPeer)
 ├── command_router.gd       # Routes commands to handlers
-├── handlers/               # 24 handler files (one per category)
+├── handlers/               # 26 handler files (one per category)
 │   ├── animation_handler.gd
 │   ├── animation_tree_handler.gd
 │   ├── audio_handler.gd
@@ -112,7 +112,7 @@ addons/godot_claude_skill/
 3. Find **GodotClaudeSkill** in the list and check **Enable**
 4. Check the **Output** panel — you should see:
    ```
-   [GodotClaude] Ready! 174 commands available on ws://127.0.0.1:9080
+   [GodotClaude] Ready! 185 commands available on ws://127.0.0.1:9080
    ```
 
 If you don't see this message, check:
@@ -133,7 +133,7 @@ mkdir -p .claude/commands
 cp /path/to/godot_claude_skill/.claude/commands/godot.md .claude/commands/godot.md
 ```
 
-This gives Claude Code the `/godot` slash command with full documentation of all 174 commands.
+This gives Claude Code the `/godot` slash command with full documentation of all 185 commands.
 
 #### 3b. Add CLAUDE.md Instructions (optional but recommended)
 
@@ -188,7 +188,7 @@ You: Add a script to the player with basic movement
 Claude: (creates GDScript, attaches it to the player node)
 ```
 
-## Features (26 Categories, 174 Commands)
+## Features (27 Categories, 185 Commands)
 
 | Category | Count | Highlights |
 |---|---|---|
@@ -196,12 +196,12 @@ Claude: (creates GDScript, attaches it to the player node)
 | **Scene** | 9 | Live hierarchy, create/open/save/delete, play/stop, instancing |
 | **Node** | 12 | Add/delete/rename/duplicate/move, properties, resources, signals, auto-connect |
 | **Script** | 10 | List/read/create/edit/patch, attach, validate, diagnostics |
-| **Editor** | 12 | Errors, screenshots, visual diff, execute GDScript, signals, node bounds, scene summary, viewport info |
+| **Editor** | 14 | Errors, screenshots, visual diff, execute GDScript, signals, node bounds, scene summary, viewport info, git status/diff |
 | **Input Simulation** | 5 | Keyboard, mouse, InputActions, multi-event sequences with waits |
 | **Runtime Analysis** | 16 | Live game tree via runtime bridge, properties, execute code, capture frames, recording, bridge status |
 | **Animation** | 6 | Create/edit animations, tracks, keyframes |
 | **AnimationTree** | 8 | State machines, transitions, blend trees, parameters |
-| **TileMap** | 6 | Set/get cells, fill rects, tile set info |
+| **TileMap** | 7 | Set/get cells, fill rects, tile set info, create tileset from image |
 | **3D Scene** | 6 | Meshes, lighting presets, PBR materials, environment, cameras |
 | **Physics** | 6 | Collision shapes, layers, raycasts, body config, collision audit |
 | **Particles** | 5 | GPU particles 2D/3D, presets (fire, smoke, rain, snow, sparks) |
@@ -214,10 +214,11 @@ Claude: (creates GDScript, attaches it to the player node)
 | **Testing & QA** | 5 | Automated test scenarios, assertions, stress testing |
 | **Code Analysis** | 7 | Unused resources, signal flow, complexity, circular deps, ClassDB lookup |
 | **Profiling** | 4 | FPS, memory, render metrics, snapshot history with trend analysis |
-| **Asset Management** | 6 | Sprite textures, sprite frames from spritesheets, atlas textures, import presets, NinePatch |
+| **Asset Management** | 7 | Sprite textures, sprite frames, atlas textures, import presets, NinePatch, spritesheet validation |
+| **Debug** | 4 | Output log, runtime errors, breakpoint navigation, clear breakpoints |
 | **Export** | 3 | Presets, export commands, template info |
 | **Templates** | 3 | Scene templates (12 prefabs), GDScript scaffolding (10 script templates), list templates |
-| **Meta** | 9 | List/describe/search commands, health check, doctor, version info, batch execute |
+| **Meta** | 12 | List/describe/search commands, health check, doctor, version, batch execute, event subscriptions |
 
 ## Key Features
 
@@ -445,6 +446,60 @@ bun ws_send.ts lookup_class '{"class_name":"Sprite2D","property":"texture"}'
 bun ws_send.ts lookup_class '{"class_name":"Button","include_inherited":true}'
 ```
 
+### Event Subscriptions
+
+Subscribe to editor events via WebSocket for push-based notifications:
+
+```bash
+# Subscribe to events — receive push notifications when they fire
+bun ws_send.ts subscribe '{"events":["filesystem_changed","node_added","game_started","game_stopped"]}'
+
+# Unsubscribe from all events
+bun ws_send.ts unsubscribe
+
+# Check current subscriptions
+bun ws_send.ts get_subscriptions
+```
+
+Available events: `filesystem_changed`, `node_added`, `node_removed`, `game_started`, `game_stopped`. Supports `"*"` wildcard for all events.
+
+### Debug Tools
+
+Inspect the Godot output log and runtime errors:
+
+```bash
+# Get last 50 lines of the output log
+bun ws_send.ts get_output_log '{"lines":100}'
+
+# Get runtime errors from the log
+bun ws_send.ts get_runtime_errors
+
+# Navigate to a specific line in a script (for breakpoint setting)
+bun ws_send.ts set_breakpoint '{"script_path":"res://player.gd","line":42}'
+```
+
+### Version Control Awareness
+
+Query git status directly from the editor:
+
+```bash
+# Get modified files (git status)
+bun ws_send.ts get_modified_files
+
+# Get diff for a scene file
+bun ws_send.ts get_scene_diff '{"scene_path":"res://scenes/main.tscn"}'
+```
+
+### Spritesheet Validation & Tileset Creation
+
+```bash
+# Validate spritesheet dimensions and detect empty frames
+bun ws_send.ts validate_spritesheet '{"path":"res://assets/knight_walk.png","frame_width":32,"frame_height":32}'
+
+# Create a TileSet from an image with auto-slicing
+bun ws_send.ts create_tileset_from_image '{"image_path":"res://assets/tileset.png","tile_size":16,"save_path":"res://tilesets/terrain.tres"}'
+```
+
 ## AI Asset Generation
 
 The skill includes an AI-powered asset generator that uses **structured JSON prompting** internally for dramatically improved image quality. Each aspect (subject, composition, style, technical constraints) is isolated during prompt construction to prevent concept bleeding — adjectives stay tied to their target elements instead of leaking across the image.
@@ -504,6 +559,23 @@ bun skill/generate_asset.ts "game icon sword" \
 | `style_reference` | `string` | Path to reference image for style consistency |
 | `color_palette` | `string[]` | Hex colors to constrain palette (e.g., `["#2d5a27", "#8b4513"]`) |
 | `no_manifest` | `boolean` | Skip creating `.asset.json` manifest (default: false) |
+
+### Asset Caching
+
+Generated assets are cached by prompt+options hash to avoid redundant API calls:
+
+```bash
+# First call generates and caches the asset
+bun skill/generate_asset.ts "pixel art knight" '{"output":"res://knight.png","project":".","style":"pixel_art"}'
+
+# Second call with same prompt+options returns cached version instantly
+bun skill/generate_asset.ts "pixel art knight" '{"output":"res://knight.png","project":".","style":"pixel_art"}'
+
+# Force regeneration (skip cache)
+bun skill/generate_asset.ts "pixel art knight" '{"output":"res://knight.png","project":".","style":"pixel_art","no_cache":true}'
+```
+
+Cache is stored in `.godot_claude_cache/assets/` in the project root (add to `.gitignore`).
 
 ### Asset Manifests
 
@@ -610,6 +682,39 @@ bun skill/generate_audio.ts sfx \
 # Generate a loopable ambient sound
 bun skill/generate_audio.ts sfx \
   '{"text":"Night forest ambience with crickets and wind","output":"res://audio/ambience/forest_night.mp3","project":".","duration_seconds":15,"loop":true,"prompt_influence":0.35}'
+```
+
+### Voice Presets
+
+Use human-readable names instead of voice IDs:
+
+```bash
+# Use preset name instead of voice_id
+bun skill/generate_audio.ts voice_line \
+  '{"text":"Halt! Who goes there?","voice_id":"adam","output":"res://audio/voice/guard.mp3","project":"."}'
+
+# List all voice presets
+bun skill/generate_audio.ts list_presets
+```
+
+Available presets: `adam` (deep male), `alice` (warm female), `aria` (expressive female), `bill` (older male), `brian` (narrator), `charlie` (casual male), `charlotte` (elegant female), `chris` (casual male), `daniel` (British male), `eric` (friendly male), `george` (warm male), `jessica` (young female), `laura` (soft female), `lily` (light female), `roger` (middle-aged male), `sarah` (gentle female).
+
+### Audio Post-Processing
+
+Post-process generated audio with ffmpeg (requires ffmpeg installed):
+
+```bash
+# Convert to OGG Vorbis for Godot
+bun skill/generate_audio.ts voice_line \
+  '{"text":"Hello","voice_id":"brian","output":"res://audio/hello.ogg","project":".","convert_to":"ogg"}'
+
+# Normalize audio levels
+bun skill/generate_audio.ts sfx \
+  '{"text":"explosion","output":"res://audio/boom.mp3","project":".","normalize":true}'
+
+# Trim silence from beginning and end
+bun skill/generate_audio.ts voice_line \
+  '{"text":"...pause... Hello!","voice_id":"alice","output":"res://audio/hi.mp3","project":".","trim_silence":true}'
 ```
 
 ### Inspect & Regenerate
@@ -748,19 +853,21 @@ Error responses:
 godot_claude_skill/
 ├── .claude/
 │   └── commands/
-│       └── godot.md           # Claude Code skill definition (174 commands documented)
+│       └── godot.md           # Claude Code skill definition (185 commands documented)
 ├── godot-plugin/              # Source files for the Godot EditorPlugin
 │   ├── plugin.cfg
 │   ├── godot_claude.gd        # Main plugin entry point
 │   ├── ws_server.gd           # WebSocket server
 │   ├── command_router.gd      # Command routing with category tracking
-│   ├── handlers/              # 24 handler files (one per category)
-│   └── utils/                 # Shared utilities (NodeFinder, TypeParser, UndoHelper)
+│   ├── handlers/              # 26 handler files (one per category)
+│   └── utils/                 # Shared utilities (NodeFinder, TypeParser, UndoHelper, EventBus)
 ├── skill/
 │   ├── install.sh             # Installation script (with Godot version check)
 │   ├── godot.sh               # Shell wrapper (with bun prerequisite check)
 │   ├── ws_send.ts             # Bun WebSocket client (single, batch, compact, verbose, listen)
-│   └── generate_asset.ts      # AI asset generator (Gemini/Imagen, DALL-E)
+│   ├── generate_asset.ts      # AI asset generator (Gemini/Imagen, DALL-E) with caching
+│   ├── generate_audio.ts      # AI audio generator (ElevenLabs TTS/SFX)
+│   └── audio_provider_elevenlabs.ts  # ElevenLabs API with voice presets
 └── README.md
 ```
 

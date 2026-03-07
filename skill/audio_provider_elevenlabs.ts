@@ -226,6 +226,39 @@ export async function listVoices(): Promise<
   }));
 }
 
+// --- Voice Presets ---
+
+export const VOICE_PRESETS: Record<string, { voice_id: string; name: string; description: string }> = {
+  adam: { voice_id: "pNInz6obpgDQGcFmaJgB", name: "Adam", description: "Deep male voice — guards, authority figures" },
+  alice: { voice_id: "Xb7hH8MSUJpSbSDYk0k2", name: "Alice", description: "Warm female voice — NPCs, guides" },
+  aria: { voice_id: "9BWtsMINqrJLrRacOk9x", name: "Aria", description: "Expressive female voice — narration, companions" },
+  bill: { voice_id: "pqHfZKP75CvOlQylNhV4", name: "Bill", description: "Older male voice — mentors, elders" },
+  brian: { voice_id: "nPczCjzI2devNBz1zQrb", name: "Brian", description: "Narrator male voice — tutorials, announcements" },
+  charlie: { voice_id: "IKne3meq5aSn9XLyUdCD", name: "Charlie", description: "Australian male — casual NPCs" },
+  charlotte: { voice_id: "XB0fDUnXU5powFXDhCwa", name: "Charlotte", description: "Elegant female — nobles, merchants" },
+  chris: { voice_id: "iP95p4xoKVk53GoZ742B", name: "Chris", description: "Casual male — everyday NPCs" },
+  daniel: { voice_id: "onwK4e9ZLuTAKqWW03F9", name: "Daniel", description: "British male — formal, intellectual" },
+  eric: { voice_id: "cjVigY5qzO86Huf0OWal", name: "Eric", description: "Friendly male — shopkeepers, allies" },
+  george: { voice_id: "JBFqnCBsd6RMkjVDRZzb", name: "George", description: "Warm male — narration, storytelling" },
+  jessica: { voice_id: "cgSgspJ2msm6clMCkdEW", name: "Jessica", description: "Young female — adventurers, heroes" },
+  laura: { voice_id: "FGY2WhTYpPnrIDTdsKH5", name: "Laura", description: "Soft female — healers, wise figures" },
+  lily: { voice_id: "pFZP5JQG7iQjIQuC4Bku", name: "Lily", description: "Light female — children, fairies" },
+  roger: { voice_id: "CwhRBWXzGAHq8TQ4Fs17", name: "Roger", description: "Middle-aged male — commanders, bosses" },
+  sarah: { voice_id: "EXAVITQu4vr4xnSDxMaL", name: "Sarah", description: "Gentle female — healers, support" },
+};
+
+/**
+ * Resolve a voice preset name to an ElevenLabs voice ID.
+ * If the input matches a preset name, returns the corresponding voice_id.
+ * Otherwise, assumes it's a direct voice_id and returns it as-is.
+ */
+export function resolveVoicePreset(voiceIdOrPreset: string): string {
+  if (VOICE_PRESETS[voiceIdOrPreset.toLowerCase()]) {
+    return VOICE_PRESETS[voiceIdOrPreset.toLowerCase()].voice_id;
+  }
+  return voiceIdOrPreset; // assume it's a direct voice_id
+}
+
 // --- Error Handling ---
 
 export class ProviderError extends Error {

@@ -5,9 +5,11 @@
  * and saves them to the Godot project's asset directory.
  *
  * Usage:
- *   bun generate_audio.ts voice_line '{"text":"Hello!","voice_id":"...","output":"res://audio/voice/hello.mp3"}'
+ *   bun generate_audio.ts voice_line '{"text":"Hello!","voice_id":"adam","output":"res://audio/voice/hello.mp3"}'
  *   bun generate_audio.ts sfx '{"text":"sword clash","output":"res://audio/sfx/sword.mp3"}'
+ *   bun generate_audio.ts sfx '{"text":"rain","output":"res://audio/sfx/rain.mp3","normalize":true,"convert_to":"ogg"}'
  *   bun generate_audio.ts list_voices
+ *   bun generate_audio.ts list_presets
  *   bun generate_audio.ts inspect '{"file":"res://audio/sfx/sword.mp3"}'
  *   bun generate_audio.ts regenerate '{"file":"res://audio/sfx/sword.mp3"}'
  *
@@ -19,13 +21,16 @@
  *   AUDIO_GEN_DEFAULT_SFX_MODEL  - SFX model (default: eleven_text_to_sound_v2)
  */
 
-import { mkdirSync, existsSync } from "fs";
+import { mkdirSync, existsSync, unlinkSync, renameSync } from "fs";
 import { dirname, resolve } from "path";
+import { execSync } from "child_process";
 import {
   generateVoiceLine,
   generateSfx,
   listVoices,
   ProviderError,
+  resolveVoicePreset,
+  VOICE_PRESETS,
 } from "./audio_provider_elevenlabs";
 import type {
   VoiceLineRequest,
@@ -45,6 +50,12 @@ import type { AudioManifest, ManifestInput } from "./audio_manifest";
 
 // --- Input Types ---
 
+interface AudioPostProcessOptions {
+  convert_to?: string;    // "ogg", "wav" — convert output format
+  normalize?: boolean;    // Normalize volume to -3dB peak
+  trim_silence?: boolean; // Trim leading/trailing silence
+}
+
 interface VoiceLineOptions {
   text: string;
   output: string;
@@ -58,6 +69,9 @@ interface VoiceLineOptions {
   tags?: string[];
   bus?: string;
   no_manifest?: boolean;
+  convert_to?: string;
+  normalize?: boolean;
+  trim_silence?: boolean;
 }
 
 interface SfxOptions {
@@ -71,6 +85,9 @@ interface SfxOptions {
   tags?: string[];
   bus?: string;
   no_manifest?: boolean;
+  convert_to?: string;
+  normalize?: boolean;
+  trim_silence?: boolean;
 }
 
 interface InspectOptions {
@@ -127,6 +144,77 @@ function mimeFromFormat(format: string): string {
   return "audio/mpeg";
 }
 
+// --- Post-Processing ---
+
+function postProcessAudio(
+  filePath: string,
+  opts: AudioPostProcessOptions
+): string {
+  // Check if ffmpeg is available
+  try {
+    execSync("which ffmpeg", { encoding: "utf-8", stdio: "pipe" });
+  } catch {
+    console.error("[audio] ffmpeg not found, skipping post-processing");
+    return filePath;
+  }
+
+  let currentPath = filePath;
+
+  // Normalize volume
+  if (opts.normalize) {
+    const tmpPath = filePath.replace(/\.[^.]+$/, "_norm.mp3");
+    try {
+      execSync(
+        `ffmpeg -y -i "${currentPath}" -af loudnorm=I=-16:LRA=11:TP=-1.5 "${tmpPath}"`,
+        { encoding: "utf-8", stdio: "pipe", timeout: 30000 }
+      );
+      unlinkSync(currentPath);
+      renameSync(tmpPath, currentPath);
+      console.error(`[audio] Normalized: ${currentPath}`);
+    } catch (err) {
+      console.error(`[audio] Normalization failed: ${err}`);
+    }
+  }
+
+  // Trim silence
+  if (opts.trim_silence) {
+    const tmpPath = filePath.replace(/\.[^.]+$/, "_trim.mp3");
+    try {
+      execSync(
+        `ffmpeg -y -i "${currentPath}" -af silenceremove=start_periods=1:start_silence=0.1:start_threshold=-50dB,areverse,silenceremove=start_periods=1:start_silence=0.1:start_threshold=-50dB,areverse "${tmpPath}"`,
+        { encoding: "utf-8", stdio: "pipe", timeout: 30000 }
+      );
+      unlinkSync(currentPath);
+      renameSync(tmpPath, currentPath);
+      console.error(`[audio] Trimmed silence: ${currentPath}`);
+    } catch (err) {
+      console.error(`[audio] Silence trimming failed: ${err}`);
+    }
+  }
+
+  // Format conversion
+  if (opts.convert_to) {
+    const ext = opts.convert_to.toLowerCase();
+    const newPath = currentPath.replace(/\.[^.]+$/, `.${ext}`);
+    if (newPath !== currentPath) {
+      try {
+        const codecFlag = ext === "ogg" ? "-c:a libvorbis -q:a 6" : "";
+        execSync(
+          `ffmpeg -y -i "${currentPath}" ${codecFlag} "${newPath}"`,
+          { encoding: "utf-8", stdio: "pipe", timeout: 30000 }
+        );
+        unlinkSync(currentPath);
+        currentPath = newPath;
+        console.error(`[audio] Converted to ${ext}: ${currentPath}`);
+      } catch (err) {
+        console.error(`[audio] Format conversion failed: ${err}`);
+      }
+    }
+  }
+
+  return currentPath;
+}
+
 // --- Commands ---
 
 async function handleVoiceLine(opts: VoiceLineOptions): Promise<void> {
@@ -135,14 +223,15 @@ async function handleVoiceLine(opts: VoiceLineOptions): Promise<void> {
   if (!opts.output) throw new Error("output is required");
 
   const projectDir = resolveProjectDir(opts.project);
-  const { fullPath, resPath } = resolveOutputPath(opts.output, projectDir);
+  let { fullPath, resPath } = resolveOutputPath(opts.output, projectDir);
   const format = opts.format || formatFromOutput(opts.output);
+  const resolvedVoiceId = resolveVoicePreset(opts.voice_id);
 
   mkdirSync(dirname(fullPath), { recursive: true });
 
   const req: VoiceLineRequest = {
     text: opts.text,
-    voice_id: opts.voice_id,
+    voice_id: resolvedVoiceId,
     model: opts.model,
     language_code: opts.language_code,
     voice_settings: opts.voice_settings,
@@ -154,6 +243,19 @@ async function handleVoiceLine(opts: VoiceLineOptions): Promise<void> {
   await Bun.write(fullPath, result.audio);
   console.error(`Audio saved: ${fullPath} (${result.audio.length} bytes)`);
 
+  // Post-process if any options are set
+  if (opts.normalize || opts.trim_silence || opts.convert_to) {
+    const processedPath = postProcessAudio(fullPath, {
+      normalize: opts.normalize,
+      trim_silence: opts.trim_silence,
+      convert_to: opts.convert_to,
+    });
+    if (processedPath !== fullPath) {
+      fullPath = processedPath;
+      resPath = resPath.replace(/\.[^.]+$/, fullPath.slice(fullPath.lastIndexOf(".")));
+    }
+  }
+
   let manifestPath: string | undefined;
   if (!opts.no_manifest) {
     const input: ManifestInput = {
@@ -164,7 +266,7 @@ async function handleVoiceLine(opts: VoiceLineOptions): Promise<void> {
       asset_path: resPath,
       format,
       mime_type: result.content_type,
-      voice_id: opts.voice_id,
+      voice_id: resolvedVoiceId,
       language_code: opts.language_code,
       seed: opts.seed,
       voice_settings: opts.voice_settings as Record<string, unknown>,
@@ -210,7 +312,7 @@ async function handleSfx(opts: SfxOptions): Promise<void> {
   if (!opts.output) throw new Error("output is required");
 
   const projectDir = resolveProjectDir(opts.project);
-  const { fullPath, resPath } = resolveOutputPath(opts.output, projectDir);
+  let { fullPath, resPath } = resolveOutputPath(opts.output, projectDir);
   const format = opts.format || formatFromOutput(opts.output);
 
   mkdirSync(dirname(fullPath), { recursive: true });
@@ -225,6 +327,19 @@ async function handleSfx(opts: SfxOptions): Promise<void> {
   const result = await generateSfx(req);
   await Bun.write(fullPath, result.audio);
   console.error(`Audio saved: ${fullPath} (${result.audio.length} bytes)`);
+
+  // Post-process if any options are set
+  if (opts.normalize || opts.trim_silence || opts.convert_to) {
+    const processedPath = postProcessAudio(fullPath, {
+      normalize: opts.normalize,
+      trim_silence: opts.trim_silence,
+      convert_to: opts.convert_to,
+    });
+    if (processedPath !== fullPath) {
+      fullPath = processedPath;
+      resPath = resPath.replace(/\.[^.]+$/, fullPath.slice(fullPath.lastIndexOf(".")));
+    }
+  }
 
   const audioType = opts.loop ? "ambient_loop" : "sfx";
   let manifestPath: string | undefined;
@@ -290,6 +405,16 @@ async function handleListVoices(): Promise<void> {
       2
     )
   );
+}
+
+async function handleListPresets(): Promise<void> {
+  const presets = Object.entries(VOICE_PRESETS).map(([key, v]) => ({
+    preset: key,
+    voice_id: v.voice_id,
+    name: v.name,
+    description: v.description,
+  }));
+  console.log(JSON.stringify({ success: true, presets, count: presets.length }, null, 2));
 }
 
 async function handleInspect(opts: InspectOptions): Promise<void> {
@@ -461,18 +586,23 @@ async function handleRegenerate(opts: RegenerateOptions): Promise<void> {
 // --- Main ---
 
 function printUsage(): void {
+  const presetList = Object.entries(VOICE_PRESETS)
+    .map(([key, v]) => `    ${key.padEnd(12)} - ${v.description}`)
+    .join("\n");
+
   console.error(`Usage: bun generate_audio.ts <command> [options_json]
 
 Commands:
   voice_line    Generate a spoken voice line (TTS)
   sfx           Generate a sound effect
   list_voices   List available ElevenLabs voices
+  list_presets  List built-in voice presets
   inspect       Inspect an audio asset and its manifest
   regenerate    Regenerate an audio asset from its manifest
 
 Voice Line Options:
   text          - Text to speak (required)
-  voice_id      - ElevenLabs voice ID (required)
+  voice_id      - ElevenLabs voice ID or preset name (required)
   output        - Output path, e.g. "res://audio/voice/line.mp3" (required)
   project       - Godot project root (default: cwd)
   model         - TTS model (default: eleven_flash_v2_5)
@@ -483,6 +613,9 @@ Voice Line Options:
   tags          - Array of tags for categorization
   bus           - Godot audio bus (default: Voice)
   no_manifest   - Skip creating .audio.json manifest
+  convert_to    - Convert output format: "ogg", "wav" (requires ffmpeg)
+  normalize     - Normalize volume to -3dB peak (requires ffmpeg)
+  trim_silence  - Trim leading/trailing silence (requires ffmpeg)
 
 SFX Options:
   text              - Sound description (required)
@@ -495,6 +628,12 @@ SFX Options:
   tags              - Array of tags
   bus               - Godot audio bus (default: SFX or Ambience if loop)
   no_manifest       - Skip manifest
+  convert_to        - Convert output format: "ogg", "wav" (requires ffmpeg)
+  normalize         - Normalize volume to -3dB peak (requires ffmpeg)
+  trim_silence      - Trim leading/trailing silence (requires ffmpeg)
+
+Voice Presets (use as voice_id):
+${presetList}
 
 Environment Variables:
   ELEVENLABS_API_KEY           - ElevenLabs API key (required)
@@ -541,6 +680,9 @@ async function main(): Promise<void> {
       case "list_voices":
         await handleListVoices();
         break;
+      case "list_presets":
+        await handleListPresets();
+        break;
       case "inspect":
         await handleInspect(options as unknown as InspectOptions);
         break;
@@ -557,6 +699,7 @@ async function main(): Promise<void> {
               "voice_line",
               "sfx",
               "list_voices",
+              "list_presets",
               "inspect",
               "regenerate",
             ],

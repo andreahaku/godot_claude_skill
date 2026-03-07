@@ -19,6 +19,7 @@
 
 import { mkdirSync, existsSync, writeFileSync } from "fs";
 import { dirname, resolve, basename } from "path";
+import { createHash } from "crypto";
 
 const GOOGLE_API_KEY =
   process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY || "";
@@ -28,6 +29,47 @@ const PROVIDER =
   (GOOGLE_API_KEY ? "gemini" : OPENAI_API_KEY ? "openai" : "");
 const GEMINI_MODEL =
   process.env.GEMINI_IMAGE_MODEL || "imagen-4.0-generate-001";
+
+// --- Asset Cache ---
+
+function getCacheDir(projectDir: string): string {
+  return resolve(projectDir, ".godot_claude_cache", "assets");
+}
+
+function getCacheKey(prompt: string, options: GenerateOptions): string {
+  const hashInput = JSON.stringify({
+    prompt,
+    style: options.style || "none",
+    size: options.size,
+    aspect_ratio: options.aspect_ratio,
+    resize: options.resize,
+    remove_bg: options.remove_bg,
+    trim: options.trim,
+    quality: options.quality,
+    color_palette: options.color_palette,
+    style_notes: options.style_notes,
+  });
+  return createHash("sha256").update(hashInput).digest("hex").slice(0, 16);
+}
+
+function checkCache(projectDir: string, cacheKey: string): Buffer | null {
+  const cachePath = resolve(getCacheDir(projectDir), `${cacheKey}.png`);
+  if (existsSync(cachePath)) {
+    const { readFileSync } = require("fs");
+    console.error(`[cache] HIT: ${cacheKey}`);
+    return Buffer.from(readFileSync(cachePath));
+  }
+  return null;
+}
+
+function writeCache(projectDir: string, cacheKey: string, data: Buffer): void {
+  const cacheDir = getCacheDir(projectDir);
+  mkdirSync(cacheDir, { recursive: true });
+  const cachePath = resolve(cacheDir, `${cacheKey}.png`);
+  const { writeFileSync: fsWrite } = require("fs");
+  fsWrite(cachePath, data);
+  console.error(`[cache] STORED: ${cacheKey}`);
+}
 
 // --- Structured Prompt Types ---
 
@@ -120,6 +162,7 @@ interface GenerateOptions {
   color_palette?: string[];
   no_manifest?: boolean;
   quality?: string;
+  no_cache?: boolean;
 }
 
 // --- Universal Negative Prompt ---
@@ -930,7 +973,17 @@ async function main() {
       '  color_palette - Array of hex colors, e.g. ["#2d5a27", "#8b4513"]'
     );
     console.error(
-      "  no_manifest - Skip creating .asset.json manifest (default: false)\n"
+      "  no_manifest - Skip creating .asset.json manifest (default: false)"
+    );
+    console.error(
+      "  no_cache  - Skip cache lookup and force regeneration (default: false)\n"
+    );
+    console.error("Cache:");
+    console.error(
+      "  Assets are cached by prompt+options in .godot_claude_cache/assets/."
+    );
+    console.error(
+      "  Add .godot_claude_cache/ to .gitignore.\n"
     );
     console.error("Environment variables:");
     console.error("  GOOGLE_AI_API_KEY   - Google AI key (Gemini/Imagen)");
@@ -996,12 +1049,31 @@ async function main() {
   const { fullPath, resPath } = resolveOutputPath(options.output, projectDir);
   mkdirSync(dirname(fullPath), { recursive: true });
 
+  // Check cache
+  const cacheKey = getCacheKey(basePrompt, options);
+
   try {
-    let images: Buffer[];
-    if (PROVIDER === "openai") {
-      images = await generateWithOpenAI(promptText, options);
-    } else {
-      images = await generateWithGemini(promptText, options);
+    let images: Buffer[] = [];
+    let fromCache = false;
+
+    if (!options.no_cache) {
+      const cached = checkCache(projectDir, cacheKey);
+      if (cached) {
+        images = [cached];
+        fromCache = true;
+      }
+    }
+
+    if (!fromCache) {
+      if (PROVIDER === "openai") {
+        images = await generateWithOpenAI(promptText, options);
+      } else {
+        images = await generateWithGemini(promptText, options);
+      }
+      // Cache the result
+      if (!options.no_cache && images.length === 1) {
+        writeCache(projectDir, cacheKey, images[0]);
+      }
     }
 
     // Post-process: background removal, trim, resize
@@ -1082,6 +1154,7 @@ async function main() {
           style: options.style || "none",
           provider: PROVIDER,
           count: images.length,
+          cached: fromCache,
         },
         null,
         2

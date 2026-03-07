@@ -2,9 +2,10 @@
 class_name TileMapHandler
 extends RefCounted
 
-## TileMap tools (6):
+## TileMap tools (7):
 ## tilemap_set_cell, tilemap_fill_rect, tilemap_get_cell,
-## tilemap_clear, tilemap_get_info, tilemap_get_used_cells
+## tilemap_clear, tilemap_get_info, tilemap_get_used_cells,
+## create_tileset_from_image
 
 var _editor: EditorInterface
 var _undo: UndoHelper
@@ -23,6 +24,7 @@ func get_commands() -> Dictionary:
 		"tilemap_clear": tilemap_clear,
 		"tilemap_get_info": tilemap_get_info,
 		"tilemap_get_used_cells": tilemap_get_used_cells,
+		"create_tileset_from_image": create_tileset_from_image,
 	}
 
 
@@ -182,3 +184,82 @@ func tilemap_get_used_cells(params: Dictionary) -> Dictionary:
 		cells.append({"x": cell.x, "y": cell.y})
 
 	return {"cells": cells, "count": cells.size()}
+
+
+func create_tileset_from_image(params: Dictionary) -> Dictionary:
+	var image_path: String = params.get("image_path", "")
+	var tile_size: int = params.get("tile_size", 16)
+	var tile_width: int = params.get("tile_width", tile_size)
+	var tile_height: int = params.get("tile_height", tile_size)
+	var save_path: String = params.get("save_path", "")
+	var margin: int = params.get("margin", 0)
+	var separation: int = params.get("separation", 0)
+
+	if image_path == "":
+		return {"error": "image_path is required", "code": "MISSING_PARAM"}
+	if not image_path.begins_with("res://"):
+		image_path = "res://" + image_path
+	if save_path == "":
+		save_path = image_path.get_basename() + ".tres"
+	elif not save_path.begins_with("res://"):
+		save_path = "res://" + save_path
+	if not save_path.ends_with(".tres"):
+		save_path += ".tres"
+
+	# Ensure file is imported
+	_editor.get_resource_filesystem().scan()
+
+	if not ResourceLoader.exists(image_path):
+		return {"error": "Image not found: %s" % image_path, "code": "FILE_NOT_FOUND"}
+
+	var texture = load(image_path) as Texture2D
+	if texture == null:
+		return {"error": "Cannot load as texture: %s" % image_path, "code": "LOAD_ERROR"}
+
+	var img_width = texture.get_width()
+	var img_height = texture.get_height()
+
+	# Create TileSet
+	var tileset = TileSet.new()
+	tileset.tile_size = Vector2i(tile_width, tile_height)
+
+	# Add the texture as a TileSetAtlasSource
+	var atlas_source = TileSetAtlasSource.new()
+	atlas_source.texture = texture
+	atlas_source.texture_region_size = Vector2i(tile_width, tile_height)
+	atlas_source.margins = Vector2i(margin, margin)
+	atlas_source.separation = Vector2i(separation, separation)
+
+	# Calculate grid dimensions
+	var usable_width = img_width - 2 * margin
+	var usable_height = img_height - 2 * margin
+	var columns = usable_width / (tile_width + separation)
+	var rows = usable_height / (tile_height + separation)
+
+	# Create tiles for each grid cell
+	var tile_count := 0
+	for row in range(rows):
+		for col in range(columns):
+			atlas_source.create_tile(Vector2i(col, row))
+			tile_count += 1
+
+	var source_id = tileset.add_source(atlas_source)
+
+	# Save the TileSet resource
+	var dir_path = save_path.get_base_dir()
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir_path))
+	var err = ResourceSaver.save(tileset, save_path)
+	if err != OK:
+		return {"error": "Failed to save TileSet: %s" % error_string(err), "code": "SAVE_ERROR"}
+
+	_editor.get_resource_filesystem().scan()
+
+	return {
+		"save_path": save_path,
+		"source_image": image_path,
+		"tile_size": [tile_width, tile_height],
+		"columns": columns,
+		"rows": rows,
+		"tile_count": tile_count,
+		"source_id": source_id,
+	}

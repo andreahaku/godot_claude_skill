@@ -2,11 +2,12 @@
 class_name EditorHandler
 extends RefCounted
 
-## Editor tools (12):
+## Editor tools (14):
 ## get_editor_errors, get_editor_screenshot, get_game_screenshot,
 ## compare_screenshots, execute_editor_script, get_signals,
 ## reload_plugin, reload_project, clear_output,
-## get_node_bounds, get_scene_summary, get_viewport_info
+## get_node_bounds, get_scene_summary, get_viewport_info,
+## get_modified_files, get_scene_diff
 
 var _editor: EditorInterface
 var _plugin: EditorPlugin
@@ -31,6 +32,8 @@ func get_commands() -> Dictionary:
 		"get_node_bounds": get_node_bounds,
 		"get_scene_summary": get_scene_summary,
 		"get_viewport_info": get_viewport_info,
+		"get_modified_files": get_modified_files,
+		"get_scene_diff": get_scene_diff,
 	}
 
 
@@ -354,3 +357,106 @@ func _find_cameras(node: Node, root: Node, out: Array) -> void:
 
 	for child in node.get_children():
 		_find_cameras(child, root, out)
+
+
+func get_modified_files(params: Dictionary) -> Dictionary:
+	var project_path: String = ProjectSettings.globalize_path("res://")
+	var output: Array = []
+
+	# Run git status to get modified files
+	var args: PackedStringArray = PackedStringArray([
+		"-C", project_path,
+		"status", "--porcelain", "--short",
+	])
+	var git_output: Array = []
+	var exit_code = OS.execute("git", args, git_output)
+
+	if exit_code != 0:
+		return {"error": "git not available or not a git repository", "code": "GIT_ERROR"}
+
+	var files: Array = []
+	if git_output.size() > 0:
+		var lines: PackedStringArray = str(git_output[0]).strip_edges().split("\n")
+		for line in lines:
+			var trimmed = line.strip_edges()
+			if trimmed == "":
+				continue
+			var status_code = trimmed.substr(0, 2).strip_edges()
+			var file_path = trimmed.substr(3).strip_edges()
+			# Filter for game-relevant files
+			var ext = file_path.get_extension().to_lower()
+			var is_scene = ext in ["tscn", "scn"]
+			var is_script = ext in ["gd", "gdshader", "glsl"]
+			var is_resource = ext in ["tres", "res"]
+			var is_asset = ext in ["png", "jpg", "svg", "ogg", "mp3", "wav"]
+			files.append({
+				"status": status_code,
+				"path": file_path,
+				"is_scene": is_scene,
+				"is_script": is_script,
+				"is_resource": is_resource,
+				"is_asset": is_asset,
+			})
+
+	var summary: Dictionary = {
+		"scenes": files.filter(func(f): return f.is_scene).size(),
+		"scripts": files.filter(func(f): return f.is_script).size(),
+		"resources": files.filter(func(f): return f.is_resource).size(),
+		"assets": files.filter(func(f): return f.is_asset).size(),
+	}
+
+	return {"files": files, "count": files.size(), "summary": summary}
+
+
+func get_scene_diff(params: Dictionary) -> Dictionary:
+	var scene_path: String = params.get("scene_path", "")
+
+	var root = _editor.get_edited_scene_root()
+	if root == null:
+		return {"error": "No scene open", "code": "NO_SCENE"}
+
+	if scene_path == "":
+		scene_path = root.scene_file_path
+
+	if scene_path == "":
+		return {"error": "Scene has not been saved yet", "code": "UNSAVED_SCENE"}
+
+	var project_path: String = ProjectSettings.globalize_path("res://")
+	var relative_path = scene_path.trim_prefix("res://")
+
+	# Get git diff for the scene file
+	var args: PackedStringArray = PackedStringArray([
+		"-C", project_path,
+		"diff", "--stat", "--", relative_path,
+	])
+	var git_output: Array = []
+	var exit_code = OS.execute("git", args, git_output)
+
+	if exit_code != 0:
+		return {"error": "git not available or not a git repository", "code": "GIT_ERROR"}
+
+	var diff_stat: String = str(git_output[0]).strip_edges() if git_output.size() > 0 else ""
+
+	# Also get the actual diff (limited)
+	args = PackedStringArray([
+		"-C", project_path,
+		"diff", "--unified=3", "--", relative_path,
+	])
+	git_output = []
+	exit_code = OS.execute("git", args, git_output)
+
+	var diff_content: String = ""
+	if exit_code == 0 and git_output.size() > 0:
+		diff_content = str(git_output[0])
+		# Limit diff size to prevent WebSocket overflow
+		if diff_content.length() > 10000:
+			diff_content = diff_content.substr(0, 10000) + "\n... (truncated, full diff is %d chars)" % diff_content.length()
+
+	var has_changes = diff_stat != "" or diff_content != ""
+
+	return {
+		"scene_path": scene_path,
+		"has_changes": has_changes,
+		"diff_stat": diff_stat,
+		"diff": diff_content if has_changes else null,
+	}

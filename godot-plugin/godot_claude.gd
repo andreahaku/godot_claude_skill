@@ -12,6 +12,8 @@ var _ws: GodotClaudeWS
 var _router: CommandRouter
 var _undo: UndoHelper
 var _bridge_server: BridgeServer
+var _event_bus: EventBus
+var _game_was_running: bool = false
 
 var _handlers: Array = []
 
@@ -34,6 +36,30 @@ func _enter_tree() -> void:
 	var bridge_err = _bridge_server.start()
 	if bridge_err != OK:
 		push_warning("[GodotClaude] Bridge server failed to start (runtime bridge will be unavailable)")
+
+	# Initialize event bus for push notifications
+	_event_bus = EventBus.new()
+	_event_bus.name = "EventBus"
+	add_child(_event_bus)
+
+	# Connect event bus to WebSocket for push delivery
+	_event_bus.event_emitted.connect(_on_event)
+	_ws.peer_disconnected.connect(_event_bus.remove_peer)
+
+	# Connect editor signals for automatic event emission
+	var ei_signals = get_editor_interface()
+	ei_signals.get_resource_filesystem().filesystem_changed.connect(func(): _event_bus.emit_event("filesystem_changed", {}))
+	# Scene change detection
+	get_tree().node_added.connect(func(node: Node):
+		if _event_bus.get_subscribers_for_event("node_added").size() > 0:
+			var root = ei_signals.get_edited_scene_root()
+			if root and node.is_inside_tree() and root.is_ancestor_of(node):
+				_event_bus.emit_event("node_added", {"name": str(node.name), "type": node.get_class()})
+	)
+	get_tree().node_removed.connect(func(node: Node):
+		if _event_bus.get_subscribers_for_event("node_removed").size() > 0:
+			_event_bus.emit_event("node_removed", {"name": str(node.name), "type": node.get_class()})
+	)
 
 	# Initialize router (with undo support for atomic batch mode)
 	_router = CommandRouter.new(_ws, _undo)
@@ -67,6 +93,7 @@ func _enter_tree() -> void:
 		[AssetHandler, [ei, _undo]],
 		[ExportHandler, [ei]],
 		[TemplateHandler, [ei, _undo]],
+		[DebugHandler, [ei, self]],
 	]
 
 	for config in handler_configs:
@@ -95,6 +122,11 @@ func _enter_tree() -> void:
 	_router.register("health_check", _health_check)
 	_router.register("doctor", _doctor)
 	_router.register("batch_execute", _router.batch_execute)
+	# Register subscription commands (intercepted in _on_command before router, but
+	# registered here so they appear in list_commands / search_commands)
+	_router.register("subscribe", func(p): return {})
+	_router.register("unsubscribe", func(p): return {})
+	_router.register("get_subscriptions", func(p): return {})
 
 	# Register command metadata (undoable, persistent, runtime_only, etc.)
 	_register_command_metadata()
@@ -112,6 +144,9 @@ func _enter_tree() -> void:
 
 
 func _exit_tree() -> void:
+	if _event_bus:
+		remove_child(_event_bus)
+		_event_bus = null
 	if _bridge_server:
 		_bridge_server.stop()
 		remove_child(_bridge_server)
@@ -128,10 +163,43 @@ func _process(delta: float) -> void:
 		_ws.poll()
 	if _bridge_server:
 		_bridge_server.poll()
+	# Detect game start/stop
+	if _event_bus:
+		var ei = get_editor_interface()
+		var game_running := ei.is_playing_scene()
+		if game_running and not _game_was_running:
+			_event_bus.emit_event("game_started", {"scene": ei.get_playing_scene()})
+		elif not game_running and _game_was_running:
+			_event_bus.emit_event("game_stopped", {})
+		_game_was_running = game_running
 
 
 func _on_command(id: String, command: String, params: Dictionary) -> void:
+	# Handle subscription commands before router (need raw peer_id)
+	var peer_id: int = params.get("_peer_id", -1)
+	if command == "subscribe":
+		var events: Array = params.get("events", [])
+		if events.is_empty():
+			_ws.send_response(peer_id, id, false, null, "events array is required", "MISSING_PARAM")
+			return
+		var result = _event_bus.subscribe(peer_id, events)
+		_ws.send_response(peer_id, id, true, result)
+		return
+	elif command == "unsubscribe":
+		var result = _event_bus.unsubscribe(peer_id)
+		_ws.send_response(peer_id, id, true, result)
+		return
+	elif command == "get_subscriptions":
+		var result = {"events": _event_bus.get_subscriptions(peer_id)}
+		_ws.send_response(peer_id, id, true, result)
+		return
 	_router.handle(id, command, params)
+
+
+func _on_event(event_type: String, data: Dictionary) -> void:
+	var subscribers := _event_bus.get_subscribers_for_event(event_type)
+	for peer_id in subscribers:
+		_ws.send_event(peer_id, event_type, data)
 
 
 func _list_commands(params: Dictionary) -> Dictionary:
@@ -410,6 +478,10 @@ func _register_command_metadata() -> void:
 		"list_export_presets", "get_export_info",
 		"get_bridge_status",
 		"import_audio_asset", "get_audio_asset_info",
+		"subscribe", "unsubscribe", "get_subscriptions",
+		"get_output_log", "get_runtime_errors",
+		"get_modified_files", "get_scene_diff",
+		"validate_spritesheet", "get_image_info",
 	]
 	for cmd in readonly_commands:
 		var meta := _router.get_command_metadata(cmd)

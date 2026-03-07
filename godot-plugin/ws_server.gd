@@ -7,6 +7,7 @@ extends Node
 ## Supports heartbeat, auto-reconnect detection, and JSON-RPC style messaging.
 
 signal command_received(id: String, command: String, params: Dictionary)
+signal peer_disconnected(peer_id: int)
 
 const DEFAULT_PORT := 9080
 const HEARTBEAT_INTERVAL := 5.0
@@ -96,6 +97,7 @@ func poll() -> void:
 	for peer_id in to_remove:
 		_ws_peers.erase(peer_id)
 		_peers.erase(peer_id)
+		peer_disconnected.emit(peer_id)
 
 
 func send_response(peer_id: int, id: String, success: bool, result: Variant = null, error_msg: String = "", error_code: String = "", suggestions: Array = []) -> void:
@@ -119,6 +121,21 @@ func send_response(peer_id: int, id: String, success: bool, result: Variant = nu
 func broadcast_response(id: String, success: bool, result: Variant = null, error_msg: String = "") -> void:
 	for peer_id in _ws_peers:
 		send_response(peer_id, id, success, result, error_msg)
+
+
+func send_event(peer_id: int, event_type: String, data: Dictionary) -> void:
+	var msg: Dictionary = {
+		"type": "event",
+		"event": event_type,
+		"data": data,
+		"timestamp": Time.get_unix_time_from_system(),
+	}
+	_send_to_peer(peer_id, JSON.stringify(msg))
+
+
+func broadcast_event(event_type: String, data: Dictionary) -> void:
+	for peer_id in _ws_peers:
+		send_event(peer_id, event_type, data)
 
 
 func _send_to_peer(peer_id: int, data: String) -> void:
