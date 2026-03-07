@@ -67,6 +67,16 @@ func export_project(params: Dictionary) -> Dictionary:
 	if preset_name == "":
 		return {"error": "preset name is required", "code": "MISSING_PARAM"}
 
+	# Validate that the preset exists
+	var presets_result = list_export_presets({})
+	var preset_names: Array = []
+	for p in presets_result.get("presets", []):
+		preset_names.append(p.get("name", ""))
+	if presets_result.get("count", 0) == 0:
+		return {"error": "No export presets configured. Use Project > Export in the Godot editor to create presets.", "code": "NO_PRESETS"}
+	if preset_name not in preset_names:
+		return {"error": "Preset '%s' not found. Available presets: %s" % [preset_name, str(preset_names)], "code": "PRESET_NOT_FOUND"}
+
 	# Find the Godot executable path
 	var godot_path = OS.get_executable_path()
 	var project_path = ProjectSettings.globalize_path("res://")

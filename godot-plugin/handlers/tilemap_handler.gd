@@ -2,10 +2,10 @@
 class_name TileMapHandler
 extends RefCounted
 
-## TileMap tools (7):
+## TileMap tools (8):
 ## tilemap_set_cell, tilemap_fill_rect, tilemap_get_cell,
 ## tilemap_clear, tilemap_get_info, tilemap_get_used_cells,
-## create_tileset_from_image
+## create_tileset_from_image, tilemap_set_tileset
 
 var _editor: EditorInterface
 var _undo: UndoHelper
@@ -25,6 +25,7 @@ func get_commands() -> Dictionary:
 		"tilemap_get_info": tilemap_get_info,
 		"tilemap_get_used_cells": tilemap_get_used_cells,
 		"create_tileset_from_image": create_tileset_from_image,
+		"tilemap_set_tileset": tilemap_set_tileset,
 	}
 
 
@@ -184,6 +185,41 @@ func tilemap_get_used_cells(params: Dictionary) -> Dictionary:
 		cells.append({"x": cell.x, "y": cell.y})
 
 	return {"cells": cells, "count": cells.size()}
+
+
+func tilemap_set_tileset(params: Dictionary) -> Dictionary:
+	var node_path: String = params.get("node_path", "")
+	var tileset_path: String = params.get("tileset_path", "")
+
+	if node_path == "" or tileset_path == "":
+		return {"error": "node_path and tileset_path are required", "code": "MISSING_PARAM"}
+
+	if not tileset_path.begins_with("res://"):
+		tileset_path = "res://" + tileset_path
+
+	var tm = _get_tilemap(node_path)
+	if tm == null:
+		return {"error": "TileMapLayer not found: %s" % node_path, "code": "NODE_NOT_FOUND"}
+
+	if not ResourceLoader.exists(tileset_path):
+		return {"error": "TileSet not found: %s" % tileset_path, "code": "FILE_NOT_FOUND"}
+
+	var tileset = load(tileset_path) as TileSet
+	if tileset == null:
+		return {"error": "Failed to load TileSet: %s" % tileset_path, "code": "LOAD_ERROR"}
+
+	var old_tileset = tm.tile_set
+	_undo.create_action("Set TileMap TileSet: %s" % tm.name)
+	_undo.add_do_property(tm, &"tile_set", tileset)
+	_undo.add_undo_property(tm, &"tile_set", old_tileset)
+	_undo.commit_action()
+
+	return {
+		"node_path": node_path,
+		"tileset_path": tileset_path,
+		"tile_size": TypeParser.value_to_json(tileset.tile_size),
+		"sources_count": tileset.get_source_count(),
+	}
 
 
 func create_tileset_from_image(params: Dictionary) -> Dictionary:

@@ -392,10 +392,23 @@ func validate_spritesheet(params: Dictionary) -> Dictionary:
 	var img_width = img.get_width()
 	var img_height = img.get_height()
 
-	# Calculate grid
-	var columns = img_width / frame_width
-	var rows = img_height / frame_height
-	var total_frames = columns * rows
+	# Calculate grid from image dimensions
+	var derived_columns = img_width / frame_width
+	var derived_rows = img_height / frame_height
+	var derived_total = derived_columns * derived_rows
+
+	# Use caller-specified columns/frame_count if provided
+	var columns: int = params.get("columns", derived_columns)
+	var frame_count: int = params.get("frame_count", 0)
+	var rows: int = derived_rows
+	var total_frames: int = derived_total
+
+	if columns != derived_columns:
+		rows = ceili(float(derived_total) / columns) if columns > 0 else derived_rows
+	if frame_count > 0:
+		total_frames = frame_count
+	else:
+		total_frames = columns * rows
 
 	# Check if dimensions divide evenly
 	var warnings: Array = []
@@ -404,16 +417,28 @@ func validate_spritesheet(params: Dictionary) -> Dictionary:
 	if img_height % frame_height != 0:
 		warnings.append("Image height %d is not evenly divisible by frame_height %d (remainder: %d)" % [img_height, frame_height, img_height % frame_height])
 
+	# Validate caller-specified values against image
+	if params.has("columns") and columns > derived_columns:
+		warnings.append("Specified columns %d exceeds image capacity %d (image is %dpx wide, frame is %dpx)" % [columns, derived_columns, img_width, frame_width])
+	if frame_count > 0 and frame_count > derived_total:
+		warnings.append("Specified frame_count %d exceeds total frames in image %d (%d columns x %d rows)" % [frame_count, derived_total, derived_columns, derived_rows])
+
 	# Analyze frame similarity — check if frames have consistent content
 	# Compare average brightness/alpha of each frame
 	var frame_stats: Array = []
 	var empty_frames: Array = []
 
-	for row in range(rows):
-		for col in range(columns):
-			var frame_idx = row * columns + col
+	var frames_scanned: int = 0
+	for row in range(derived_rows):
+		if frames_scanned >= total_frames:
+			break
+		for col in range(derived_columns):
+			if frames_scanned >= total_frames:
+				break
+			var frame_idx = frames_scanned
 			var x_start = col * frame_width
 			var y_start = row * frame_height
+			frames_scanned += 1
 
 			# Sample pixels to check if frame has content
 			var total_alpha: float = 0.0
@@ -453,6 +478,10 @@ func validate_spritesheet(params: Dictionary) -> Dictionary:
 		"valid": warnings.is_empty(),
 		"suggested_frame_count": total_frames - empty_frames.size(),
 	}
+	if columns != derived_columns or total_frames != derived_total:
+		result["derived_columns"] = derived_columns
+		result["derived_rows"] = derived_rows
+		result["derived_total_frames"] = derived_total
 	if not warnings.is_empty():
 		result["warnings"] = warnings
 	if not empty_frames.is_empty():
