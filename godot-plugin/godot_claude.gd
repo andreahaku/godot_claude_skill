@@ -409,6 +409,7 @@ func _register_command_metadata() -> void:
 		"find_node_references", "get_scene_dependencies",
 		"list_export_presets", "get_export_info",
 		"get_bridge_status",
+		"import_audio_asset", "get_audio_asset_info",
 	]
 	for cmd in readonly_commands:
 		var meta := _router.get_command_metadata(cmd)

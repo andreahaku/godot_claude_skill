@@ -1,6 +1,6 @@
 # Godot Claude Skill
 
-A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **169 commands across 26 categories** with full undo/redo support, AI asset generation, runtime bridge for true game introspection, and structured script patching.
+A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **174 commands across 26 categories** with full undo/redo support, AI asset/audio generation, runtime bridge for true game introspection, and structured script patching.
 
 ## Architecture
 
@@ -11,8 +11,8 @@ A comprehensive Claude Code skill for controlling the Godot game engine editor i
 │  skill/         │     :9080          │  godot-plugin/       │
 │  ws_send.ts     │                    │  godot_claude.gd     │
 │  generate_asset │  JSON commands     │  command_router.gd   │
-└─────────────────┘                    │  25 handlers         │
-                                       │  bridge_server.gd    │
+│  generate_audio │                    │  25 handlers         │
+└─────────────────┘                    │  bridge_server.gd    │
                                        └──────────┬───────────┘
                                                    │ ws://127.0.0.1:9081
                                        ┌───────────▼───────────┐
@@ -33,6 +33,7 @@ A separate **runtime bridge** (port 9081) connects the running game process back
 - **Claude Code** CLI
 - **Python 3 + Pillow** (optional, for asset post-processing: `pip install Pillow`)
 - **API key** (optional, for asset generation): Google AI (`GOOGLE_AI_API_KEY`) or OpenAI (`OPENAI_API_KEY`)
+- **ElevenLabs API key** (optional, for audio generation): `ELEVENLABS_API_KEY`
 
 ## Quick Start
 
@@ -111,7 +112,7 @@ addons/godot_claude_skill/
 3. Find **GodotClaudeSkill** in the list and check **Enable**
 4. Check the **Output** panel — you should see:
    ```
-   [GodotClaude] Ready! 169 commands available on ws://127.0.0.1:9080
+   [GodotClaude] Ready! 174 commands available on ws://127.0.0.1:9080
    ```
 
 If you don't see this message, check:
@@ -132,7 +133,7 @@ mkdir -p .claude/commands
 cp /path/to/godot_claude_skill/.claude/commands/godot.md .claude/commands/godot.md
 ```
 
-This gives Claude Code the `/godot` slash command with full documentation of all 169 commands.
+This gives Claude Code the `/godot` slash command with full documentation of all 174 commands.
 
 #### 3b. Add CLAUDE.md Instructions (optional but recommended)
 
@@ -187,7 +188,7 @@ You: Add a script to the player with basic movement
 Claude: (creates GDScript, attaches it to the player node)
 ```
 
-## Features (26 Categories, 169 Commands)
+## Features (26 Categories, 174 Commands)
 
 | Category | Count | Highlights |
 |---|---|---|
@@ -205,7 +206,7 @@ Claude: (creates GDScript, attaches it to the player node)
 | **Physics** | 6 | Collision shapes, layers, raycasts, body config, collision audit |
 | **Particles** | 5 | GPU particles 2D/3D, presets (fire, smoke, rain, snow, sparks) |
 | **Navigation** | 5 | Regions, mesh baking, agents, layers, navigation audit |
-| **Audio** | 7 | Bus layout, add/remove buses, effects (reverb, delay, etc.), audio players |
+| **Audio** | 12 | Bus layout, add/remove buses, effects, audio players, import/attach/inspect assets, randomizer |
 | **Theme & UI** | 6 | Create themes, colors, constants, font sizes, styleboxes |
 | **Shader** | 6 | Create/edit GLSL, assign materials, set/get uniforms |
 | **Resource** | 3 | Read/edit/create .tres files of any type |
@@ -574,6 +575,96 @@ bun skill/ws_send.ts create_sprite_frames \
 | `ASSET_GEN_PROVIDER` | auto-detect | `gemini` or `openai` |
 | `GEMINI_IMAGE_MODEL` | `imagen-4.0-generate-001` | Google image model |
 
+## AI Audio Generation
+
+The skill includes AI-powered audio generation using **ElevenLabs** for voice lines (TTS) and sound effects (SFX). Generated audio files are saved to the Godot project with sidecar `.audio.json` manifests for regeneration and traceability.
+
+### Setup
+
+```bash
+# Set your ElevenLabs API key
+export ELEVENLABS_API_KEY="your-elevenlabs-api-key"
+```
+
+Get an API key at [elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys).
+
+### Voice Lines
+
+```bash
+# Generate a spoken voice line
+bun skill/generate_audio.ts voice_line \
+  '{"text":"Halt! State your business.","voice_id":"JBFqnCBsd6RMkjVDRZzb","output":"res://audio/voice/guard_alert.mp3","project":"."}'
+
+# With voice settings and tags
+bun skill/generate_audio.ts voice_line \
+  '{"text":"We need to move now!","voice_id":"JBFqnCBsd6RMkjVDRZzb","output":"res://audio/voice/npc_urgent.mp3","project":".","voice_settings":{"stability":0.4,"similarity_boost":0.8},"tags":["dialogue","guard","combat"]}'
+```
+
+### Sound Effects
+
+```bash
+# Generate a one-shot SFX
+bun skill/generate_audio.ts sfx \
+  '{"text":"Short metallic sword impact with bright ring","output":"res://audio/sfx/sword_hit.mp3","project":".","duration_seconds":1.2}'
+
+# Generate a loopable ambient sound
+bun skill/generate_audio.ts sfx \
+  '{"text":"Night forest ambience with crickets and wind","output":"res://audio/ambience/forest_night.mp3","project":".","duration_seconds":15,"loop":true,"prompt_influence":0.35}'
+```
+
+### Inspect & Regenerate
+
+```bash
+# Inspect an audio asset and its manifest
+bun skill/generate_audio.ts inspect '{"file":"res://audio/sfx/sword_hit.mp3","project":"."}'
+
+# Regenerate from manifest (same settings, new output)
+bun skill/generate_audio.ts regenerate '{"file":"res://audio/sfx/sword_hit.mp3","project":"."}'
+
+# List available ElevenLabs voices
+bun skill/generate_audio.ts list_voices
+```
+
+### Godot Integration
+
+After generating audio, use Godot plugin commands to import and wire it into scenes:
+
+```bash
+# 1. Import the audio asset (triggers Godot rescan)
+bun skill/ws_send.ts import_audio_asset '{"audio_path":"res://audio/sfx/sword_hit.mp3"}'
+
+# 2. Ensure the SFX bus exists
+bun skill/ws_send.ts create_audio_bus_if_missing '{"name":"SFX"}'
+
+# 3. Attach to an audio player node
+bun skill/ws_send.ts attach_audio_stream '{"node_path":"Player/HitSfx","audio_path":"res://audio/sfx/sword_hit.mp3","bus":"SFX"}'
+
+# 4. Create an AudioStreamRandomizer from multiple SFX variants
+bun skill/ws_send.ts create_audio_randomizer '{"name":"FootstepSfx","parent_path":"Player","audio_paths":["res://audio/sfx/step_01.mp3","res://audio/sfx/step_02.mp3","res://audio/sfx/step_03.mp3"],"bus":"SFX"}'
+
+# 5. Inspect audio asset details
+bun skill/ws_send.ts get_audio_asset_info '{"audio_path":"res://audio/sfx/sword_hit.mp3"}'
+```
+
+### Audio Manifests
+
+Every generated audio file gets a sidecar `.audio.json` manifest:
+
+```
+sword_hit.mp3 → sword_hit.audio.json
+```
+
+Contains: type, provider, source text, voice settings, model, format, bus assignment, tags, and regeneration history.
+
+### Environment Variables for Audio Generation
+
+| Variable | Default | Description |
+|---|---|---|
+| `ELEVENLABS_API_KEY` | — | ElevenLabs API key (required) |
+| `AUDIO_GEN_DEFAULT_FORMAT` | `mp3_44100_128` | Output format |
+| `AUDIO_GEN_DEFAULT_VOICE_MODEL` | `eleven_flash_v2_5` | TTS model |
+| `AUDIO_GEN_DEFAULT_SFX_MODEL` | `eleven_text_to_sound_v2` | SFX model |
+
 ## Command Protocol
 
 Commands are sent as JSON over WebSocket:
@@ -657,7 +748,7 @@ Error responses:
 godot_claude_skill/
 ├── .claude/
 │   └── commands/
-│       └── godot.md           # Claude Code skill definition (169 commands documented)
+│       └── godot.md           # Claude Code skill definition (174 commands documented)
 ├── godot-plugin/              # Source files for the Godot EditorPlugin
 │   ├── plugin.cfg
 │   ├── godot_claude.gd        # Main plugin entry point
