@@ -6,6 +6,7 @@ extends EditorPlugin
 ## Enables AI-driven control of the Godot editor with full UndoRedo support.
 
 const WS_PORT := 9080
+const PLUGIN_VERSION := "1.1.0"
 
 var _ws: GodotClaudeWS
 var _router: CommandRouter
@@ -73,15 +74,25 @@ func _enter_tree() -> void:
 			_handlers.append(handler)
 			var commands := handler.get_commands()
 			_router.register_all(commands, handler)
-			# Mark commands from undo-using handlers as undoable
+			# Mark commands from undo-using handlers as undoable (merge with existing metadata)
 			if _undo in config[1]:
 				for cmd in commands:
-					_router.register_metadata(cmd, {"undoable": true, "safe_for_batch": true})
+					var meta := _router.get_command_metadata(cmd)
+					if not meta.has("undoable"):
+						meta["undoable"] = true
+					if not meta.has("safe_for_batch"):
+						meta["safe_for_batch"] = true
+					_router.register_metadata(cmd, meta)
 
 	# Register meta commands
 	_router.register("list_commands", _list_commands)
 	_router.register("get_command_info", _get_command_info)
+	_router.register("describe_command", _describe_command)
+	_router.register("describe_category", _describe_category)
+	_router.register("search_commands", _search_commands)
 	_router.register("get_version", _get_version)
+	_router.register("health_check", _health_check)
+	_router.register("doctor", _doctor)
 	_router.register("batch_execute", _router.batch_execute)
 
 	# Register command metadata (undoable, persistent, runtime_only, etc.)
@@ -123,6 +134,7 @@ func _on_command(id: String, command: String, params: Dictionary) -> void:
 
 
 func _list_commands(params: Dictionary) -> Dictionary:
+	var include_schemas: bool = params.get("include_schemas", false)
 	var cmds = _router.get_command_list()
 	var categories = _router.get_command_categories()
 
@@ -132,7 +144,14 @@ func _list_commands(params: Dictionary) -> Dictionary:
 		var cat: String = categories.get(cmd, "meta")
 		if not grouped.has(cat):
 			grouped[cat] = []
-		grouped[cat].append(cmd)
+		if include_schemas:
+			var schema = _router.get_command_schema(cmd)
+			var info: Dictionary = {"command": cmd}
+			if schema.has("description") and schema.description != "":
+				info["description"] = schema["description"]
+			grouped[cat].append(info)
+		else:
+			grouped[cat].append(cmd)
 
 	return {"commands": cmds, "count": cmds.size(), "categories": grouped}
 
@@ -153,18 +172,188 @@ func _get_command_info(params: Dictionary) -> Dictionary:
 
 	var categories = _router.get_command_categories()
 	var metadata = _router.get_command_metadata(command)
+	var schema = _router.get_command_schema(command)
 	var info: Dictionary = {"command": command, "category": categories.get(command, "meta"), "exists": true}
+	if not schema.is_empty():
+		if schema.get("description", "") != "":
+			info["description"] = schema["description"]
+		if not schema.get("params", {}).is_empty():
+			info["params"] = schema["params"]
 	if not metadata.is_empty():
 		info["metadata"] = metadata
 	return info
 
 
+func _describe_command(params: Dictionary) -> Dictionary:
+	var command: String = params.get("command", "")
+	if command == "":
+		return {"error": "command parameter is required", "code": "MISSING_PARAM"}
+
+	var cmds = _router.get_command_list()
+	if command not in cmds:
+		# Fuzzy match — find similar command names
+		var suggestions: Array = []
+		for cmd in cmds:
+			if cmd.contains(command) or command.contains(cmd):
+				suggestions.append(cmd)
+		return {"error": "Unknown command: %s" % command, "code": "UNKNOWN_COMMAND", "suggestions": suggestions.slice(0, 5)}
+
+	var categories = _router.get_command_categories()
+	var schema = _router.get_command_schema(command)
+	var metadata = _router.get_command_metadata(command)
+
+	var result: Dictionary = {
+		"command": command,
+		"category": categories.get(command, "meta"),
+	}
+	if not schema.is_empty():
+		if schema.get("description", "") != "":
+			result["description"] = schema["description"]
+		if not schema.get("params", {}).is_empty():
+			result["params"] = schema["params"]
+	if not metadata.is_empty():
+		result["metadata"] = metadata
+
+	return result
+
+
+func _describe_category(params: Dictionary) -> Dictionary:
+	var category: String = params.get("category", "")
+	var categories = _router.get_command_categories()
+
+	if category == "":
+		# Return all categories with command counts
+		var summary: Dictionary = {}
+		for cmd in categories:
+			var cat: String = categories[cmd]
+			if not summary.has(cat):
+				summary[cat] = []
+			summary[cat].append(cmd)
+		return {"categories": summary}
+
+	# Return details for a specific category
+	var commands_in_cat: Array = []
+	for cmd in categories:
+		if categories[cmd] == category:
+			var schema = _router.get_command_schema(cmd)
+			var metadata = _router.get_command_metadata(cmd)
+			var info: Dictionary = {"command": cmd}
+			if not schema.is_empty() and schema.get("description", "") != "":
+				info["description"] = schema["description"]
+			if not metadata.is_empty():
+				info["metadata"] = metadata
+			commands_in_cat.append(info)
+
+	if commands_in_cat.is_empty():
+		# Fuzzy match category name
+		var all_cats: Array = []
+		for cmd in categories:
+			var cat: String = categories[cmd]
+			if cat not in all_cats:
+				all_cats.append(cat)
+		var suggestions: Array = []
+		for cat in all_cats:
+			if cat.to_lower().contains(category.to_lower()) or category.to_lower().contains(cat.to_lower()):
+				suggestions.append(cat)
+		return {"error": "Unknown category: %s" % category, "code": "UNKNOWN_CATEGORY", "suggestions": suggestions.slice(0, 5)}
+
+	return {"category": category, "commands": commands_in_cat, "count": commands_in_cat.size()}
+
+
+func _search_commands(params: Dictionary) -> Dictionary:
+	var query: String = params.get("query", "")
+	if query == "":
+		return {"error": "query parameter is required", "code": "MISSING_PARAM"}
+
+	var query_lower := query.to_lower()
+	var matches: Array = []
+	var categories = _router.get_command_categories()
+
+	for cmd in _router.get_command_list():
+		var score: int = 0
+		# Match in command name
+		if cmd.contains(query_lower):
+			score += 10
+		# Match in category
+		var cat: String = categories.get(cmd, "")
+		if cat.to_lower().contains(query_lower):
+			score += 5
+		# Match in description
+		var schema = _router.get_command_schema(cmd)
+		var desc: String = schema.get("description", "").to_lower()
+		if desc.contains(query_lower):
+			score += 3
+		# Match in param names
+		var param_schemas: Dictionary = schema.get("params", {})
+		for p in param_schemas:
+			if p.contains(query_lower):
+				score += 1
+
+		if score > 0:
+			var info: Dictionary = {"command": cmd, "category": cat, "score": score}
+			if schema.get("description", "") != "":
+				info["description"] = schema["description"]
+			matches.append(info)
+
+	# Sort by score descending
+	matches.sort_custom(func(a, b): return a.score > b.score)
+
+	return {"query": query, "matches": matches.slice(0, 20), "total_matches": matches.size()}
+
+
 func _get_version(params: Dictionary) -> Dictionary:
 	return {
-		"plugin_version": "1.0.0",
+		"plugin_version": PLUGIN_VERSION,
 		"godot_version": "%s.%s.%s" % [Engine.get_version_info().major, Engine.get_version_info().minor, Engine.get_version_info().patch],
 		"commands": _router.get_command_list().size(),
 	}
+
+
+func _health_check(params: Dictionary) -> Dictionary:
+	var ei = get_editor_interface()
+	var scene_root = ei.get_edited_scene_root()
+	return {
+		"plugin_version": PLUGIN_VERSION,
+		"godot_version": Engine.get_version_info(),
+		"ws_status": "running" if _ws else "stopped",
+		"scene_loaded": scene_root != null,
+		"scene_path": scene_root.scene_file_path if scene_root else "",
+		"handler_count": _handlers.size(),
+		"command_count": _router.get_command_list().size(),
+		"game_running": ei.is_playing_scene(),
+		"bridge_connected": _bridge_server.is_bridge_connected() if _bridge_server else false,
+		"undo_available": true,
+	}
+
+
+func _doctor(params: Dictionary) -> Dictionary:
+	var checks: Array = []
+	var ei = get_editor_interface()
+	var scene_root = ei.get_edited_scene_root()
+
+	checks.append({"name": "plugin_enabled", "status": "ok", "message": "Plugin is running"})
+
+	if _ws:
+		checks.append({"name": "websocket", "status": "ok", "message": "WebSocket server is active"})
+	else:
+		checks.append({"name": "websocket", "status": "error", "message": "WebSocket server is not running"})
+
+	if _bridge_server:
+		checks.append({"name": "bridge_server", "status": "ok", "message": "Bridge server is active"})
+	else:
+		checks.append({"name": "bridge_server", "status": "error", "message": "Bridge server is not available"})
+
+	if scene_root:
+		checks.append({"name": "scene_loaded", "status": "ok", "message": "Scene loaded: %s" % scene_root.scene_file_path})
+	else:
+		checks.append({"name": "scene_loaded", "status": "warning", "message": "No scene is currently loaded"})
+
+	checks.append({"name": "handlers", "status": "ok", "message": "%d handlers registered" % _handlers.size()})
+
+	var cmd_count = _router.get_command_list().size()
+	checks.append({"name": "commands", "status": "ok", "message": "%d commands available" % cmd_count})
+
+	return {"checks": checks}
 
 
 func _register_command_metadata() -> void:
@@ -209,7 +398,8 @@ func _register_command_metadata() -> void:
 
 	# Meta/read-only commands: safe, not undoable (nothing to undo)
 	var readonly_commands: Array[String] = [
-		"list_commands", "get_command_info", "get_version", "batch_execute",
+		"list_commands", "get_command_info", "describe_command", "describe_category",
+		"search_commands", "get_version", "health_check", "doctor", "batch_execute",
 		"list_scripts", "read_script", "get_open_scripts",
 		"get_scene_tree", "get_scene_file_content",
 		"get_node_properties",
@@ -232,6 +422,8 @@ func _create_handler(handler_class, args: Array):
 			return handler_class.new(args[0])
 		2:
 			return handler_class.new(args[0], args[1])
+		3:
+			return handler_class.new(args[0], args[1], args[2])
 		_:
 			push_error("[GodotClaude] Unsupported handler constructor arity: %d" % args.size())
 			return null

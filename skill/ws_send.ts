@@ -19,6 +19,7 @@
  *   bun ws_send.ts --listen
  */
 
+const CLIENT_VERSION = "1.1.0";
 const WS_URL = process.env.GODOT_WS_URL || "ws://127.0.0.1:9080";
 const TIMEOUT_MS = parseInt(process.env.GODOT_TIMEOUT || "30000", 10);
 
@@ -284,12 +285,18 @@ async function listenMode() {
 async function main() {
   const args = process.argv.slice(2);
 
+  if (args.includes("--version")) {
+    console.log(`ws_send.ts v${CLIENT_VERSION}`);
+    process.exit(0);
+  }
+
   if (args.length === 0) {
     console.error(`Usage:
   bun ws_send.ts <command> [json_params]           Single command
   bun ws_send.ts --compact <command> [json_params]  Compact output (OK/FAIL)
   bun ws_send.ts --verbose <command> [json_params]  Show raw WebSocket messages
   bun ws_send.ts --listen                           Interactive persistent connection
+  bun ws_send.ts --version                          Print version and exit
   echo '{"command":"x","params":{}}' | bun ws_send.ts --batch    Batch from stdin
   cat commands.jsonl | bun ws_send.ts --batch --compact          Batch compact`);
     process.exit(1);
@@ -299,6 +306,10 @@ async function main() {
   const compact = args.includes("--compact");
   const batch = args.includes("--batch");
   const listen = args.includes("--listen");
+
+  if (verbose) {
+    console.error(`ws_send.ts v${CLIENT_VERSION} | ${WS_URL} | timeout=${TIMEOUT_MS}ms`);
+  }
   const filteredArgs = args.filter((a) => !a.startsWith("--"));
 
   if (listen) {

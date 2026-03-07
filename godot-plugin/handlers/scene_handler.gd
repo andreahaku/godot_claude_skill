@@ -18,15 +18,102 @@ func _init(editor: EditorInterface, undo: UndoHelper):
 
 func get_commands() -> Dictionary:
 	return {
-		"get_scene_tree": get_scene_tree,
-		"get_scene_file_content": get_scene_file_content,
-		"create_scene": create_scene,
-		"open_scene": open_scene,
-		"delete_scene": delete_scene,
-		"save_scene": save_scene,
-		"add_scene_instance": add_scene_instance,
-		"play_scene": play_scene,
-		"stop_scene": stop_scene,
+		"get_scene_tree": {
+			"handler": get_scene_tree,
+			"description": "Get the full scene tree hierarchy of the currently open scene",
+			"params": {},
+			"metadata": {
+				"safe_for_batch": true,
+			},
+		},
+		"get_scene_file_content": {
+			"handler": get_scene_file_content,
+			"description": "Read the raw .tscn file content of a scene",
+			"params": {
+				"path": {"type": "string", "required": true, "description": "Scene file path (e.g., res://scenes/main.tscn)"},
+			},
+			"metadata": {
+				"safe_for_batch": true,
+			},
+		},
+		"create_scene": {
+			"handler": create_scene,
+			"description": "Create a new scene file with a specified root node type",
+			"params": {
+				"path": {"type": "string", "required": true, "description": "Path for the new scene file (e.g., res://scenes/player.tscn)"},
+				"root_type": {"type": "string", "default": "Node2D", "description": "Root node class (e.g., Node2D, Node3D, Control)"},
+				"open": {"type": "bool", "default": true, "description": "Whether to auto-open the scene after creation"},
+			},
+			"metadata": {
+				"persistent": true,
+				"undoable": false,
+				"safe_for_batch": true,
+			},
+		},
+		"open_scene": {
+			"handler": open_scene,
+			"description": "Open an existing scene file in the editor",
+			"params": {
+				"path": {"type": "string", "required": true, "description": "Path to the scene file to open"},
+			},
+			"metadata": {
+				"safe_for_batch": true,
+			},
+		},
+		"delete_scene": {
+			"handler": delete_scene,
+			"description": "Delete a scene file from disk",
+			"params": {
+				"path": {"type": "string", "required": true, "description": "Path to the scene file to delete"},
+			},
+			"metadata": {
+				"persistent": true,
+				"undoable": false,
+				"safe_for_batch": true,
+			},
+		},
+		"save_scene": {
+			"handler": save_scene,
+			"description": "Save the currently open scene (optionally to a new path)",
+			"params": {
+				"path": {"type": "string", "default": "", "description": "Save path (empty = save to current path)"},
+			},
+			"metadata": {
+				"persistent": true,
+				"undoable": false,
+				"safe_for_batch": true,
+			},
+		},
+		"add_scene_instance": {
+			"handler": add_scene_instance,
+			"description": "Instance a packed scene as a child of a node",
+			"params": {
+				"scene_path": {"type": "string", "required": true, "description": "Path to the scene file to instance"},
+				"parent_path": {"type": "string", "default": "", "description": "Path to parent node (empty = scene root)"},
+			},
+			"metadata": {
+				"undoable": true,
+				"safe_for_batch": true,
+			},
+		},
+		"play_scene": {
+			"handler": play_scene,
+			"description": "Run a scene in the Godot player",
+			"params": {
+				"path": {"type": "string", "default": "", "description": "Scene path to play (empty = current scene)"},
+			},
+			"metadata": {
+				"safe_for_batch": true,
+			},
+		},
+		"stop_scene": {
+			"handler": stop_scene,
+			"description": "Stop the currently playing scene",
+			"params": {},
+			"metadata": {
+				"safe_for_batch": true,
+			},
+		},
 	}
 
 

@@ -19,16 +19,124 @@ func _init(editor: EditorInterface, undo: UndoHelper):
 
 func get_commands() -> Dictionary:
 	return {
-		"list_scripts": list_scripts,
-		"read_script": read_script,
-		"create_script": create_script,
-		"edit_script": edit_script,
-		"attach_script": attach_script,
-		"get_open_scripts": get_open_scripts,
-		"patch_script": patch_script,
-		"validate_script": validate_script,
-		"validate_scripts": validate_scripts,
-		"get_script_diagnostics": get_script_diagnostics,
+		"list_scripts": {
+			"handler": list_scripts,
+			"description": "List all script files in the project",
+			"params": {
+				"path": {"type": "string", "default": "res://", "description": "Directory to search for scripts"},
+				"max_results": {"type": "int", "default": 500, "description": "Maximum number of scripts to return"},
+			},
+			"metadata": {
+				"safe_for_batch": true,
+			},
+		},
+		"read_script": {
+			"handler": read_script,
+			"description": "Read the source code of a script file",
+			"params": {
+				"path": {"type": "string", "required": true, "description": "Path to the script file (e.g., res://scripts/player.gd)"},
+			},
+			"metadata": {
+				"safe_for_batch": true,
+			},
+		},
+		"create_script": {
+			"handler": create_script,
+			"description": "Create a new GDScript file with optional content",
+			"params": {
+				"path": {"type": "string", "required": true, "description": "Path for the new script file"},
+				"content": {"type": "string", "default": "", "description": "Script content (auto-generated template if empty)"},
+				"base_class": {"type": "string", "default": "Node", "description": "Base class for the auto-generated template"},
+				"class_name": {"type": "string", "default": "", "description": "Class name declaration for the auto-generated template"},
+			},
+			"metadata": {
+				"persistent": true,
+				"undoable": false,
+				"safe_for_batch": true,
+			},
+		},
+		"edit_script": {
+			"handler": edit_script,
+			"description": "Edit an existing script via search/replace, line insertion, or full replacement",
+			"params": {
+				"path": {"type": "string", "required": true, "description": "Path to the script file to edit"},
+				"search": {"type": "string", "default": "", "description": "Text to search for (used with replace)"},
+				"replace": {"type": "string", "default": "", "description": "Replacement text (used with search)"},
+				"insert_at_line": {"type": "int", "default": -1, "description": "Line number to insert at (0-indexed, used with insert_text)"},
+				"insert_text": {"type": "string", "default": "", "description": "Text to insert (used with insert_at_line)"},
+				"new_content": {"type": "string", "default": "", "description": "Complete new content to replace the entire file"},
+			},
+			"metadata": {
+				"persistent": true,
+				"undoable": false,
+				"safe_for_batch": true,
+			},
+		},
+		"attach_script": {
+			"handler": attach_script,
+			"description": "Attach an existing script file to a node",
+			"params": {
+				"node_path": {"type": "string", "required": true, "description": "Path to the target node"},
+				"script_path": {"type": "string", "required": true, "description": "Path to the script file to attach"},
+			},
+			"metadata": {
+				"undoable": true,
+				"safe_for_batch": true,
+			},
+		},
+		"get_open_scripts": {
+			"handler": get_open_scripts,
+			"description": "List all scripts currently open in the script editor",
+			"params": {},
+			"metadata": {
+				"safe_for_batch": true,
+			},
+		},
+		"patch_script": {
+			"handler": patch_script,
+			"description": "Apply multiple patch operations to a script (replace ranges, blocks, insert before/after markers)",
+			"params": {
+				"path": {"type": "string", "required": true, "description": "Path to the script file to patch"},
+				"expected_hash": {"type": "string", "default": "", "description": "MD5 hash of current content for conflict detection"},
+				"operations": {"type": "array", "required": true, "description": "Array of patch operations: replace_range, replace_exact_block, insert_before_marker, insert_after_marker, append_to_class"},
+			},
+			"metadata": {
+				"persistent": true,
+				"undoable": false,
+				"safe_for_batch": true,
+			},
+		},
+		"validate_script": {
+			"handler": validate_script,
+			"description": "Check if a GDScript file compiles without errors",
+			"params": {
+				"path": {"type": "string", "required": true, "description": "Path to the script file to validate"},
+			},
+			"metadata": {
+				"safe_for_batch": true,
+			},
+		},
+		"validate_scripts": {
+			"handler": validate_scripts,
+			"description": "Validate all scripts in a directory for compilation errors",
+			"params": {
+				"path": {"type": "string", "default": "res://", "description": "Directory to scan for scripts"},
+				"max_results": {"type": "int", "default": 100, "description": "Maximum number of scripts to validate"},
+			},
+			"metadata": {
+				"safe_for_batch": true,
+			},
+		},
+		"get_script_diagnostics": {
+			"handler": get_script_diagnostics,
+			"description": "Get detailed diagnostics for a script (compilation status, dependencies, warnings)",
+			"params": {
+				"path": {"type": "string", "required": true, "description": "Path to the script file to diagnose"},
+			},
+			"metadata": {
+				"safe_for_batch": true,
+			},
+		},
 	}
 
 

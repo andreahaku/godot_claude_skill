@@ -1,6 +1,6 @@
 # Godot Claude Skill
 
-A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **163 commands across 25 categories** with full undo/redo support, AI asset generation, runtime bridge for true game introspection, and structured script patching.
+A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **161 commands across 25 categories** with full undo/redo support, AI asset generation, runtime bridge for true game introspection, and structured script patching.
 
 ## Architecture
 
@@ -97,7 +97,9 @@ addons/godot_claude_skill/
 ├── bridge_server.gd        # Editor-side bridge server (port 9081)
 ├── runtime_bridge.gd       # Game-side autoload for runtime introspection
 └── utils/
-    ├── node_finder.gd      # Shared node lookup utility
+    ├── command_helper.gd   # Centralized validation utilities
+    ├── node_finder.gd      # Shared node lookup with fuzzy matching
+    ├── scan_helper.gd      # Debounced filesystem scan
     ├── type_parser.gd      # Smart type parsing (Vector2, Color, etc.)
     └── undo_helper.gd      # UndoRedo wrapper for Godot 4.6
 ```
@@ -109,7 +111,7 @@ addons/godot_claude_skill/
 3. Find **GodotClaudeSkill** in the list and check **Enable**
 4. Check the **Output** panel — you should see:
    ```
-   [GodotClaude] Ready! 163 commands available on ws://127.0.0.1:9080
+   [GodotClaude] Ready! 161 commands available on ws://127.0.0.1:9080
    ```
 
 If you don't see this message, check:
@@ -130,7 +132,7 @@ mkdir -p .claude/commands
 cp /path/to/godot_claude_skill/.claude/commands/godot.md .claude/commands/godot.md
 ```
 
-This gives Claude Code the `/godot` slash command with full documentation of all 163 commands.
+This gives Claude Code the `/godot` slash command with full documentation of all 161 commands.
 
 #### 3b. Add CLAUDE.md Instructions (optional but recommended)
 
@@ -213,7 +215,7 @@ Claude: (creates GDScript, attaches it to the player node)
 | **Profiling** | 4 | FPS, memory, render metrics, snapshot history with trend analysis |
 | **Asset Management** | 6 | Sprite textures, sprite frames from spritesheets, atlas textures, import presets, NinePatch |
 | **Export** | 3 | Presets, export commands, template info |
-| **Meta** | 4 | List commands, command introspection, version info, batch execute |
+| **Meta** | 9 | List/describe/search commands, health check, doctor, version info, batch execute |
 
 ## Key Features
 
@@ -340,6 +342,57 @@ bun ws_send.ts run_test_scenario '{"name":"Jump Test","steps":[
 ```
 
 Operators: `==`, `!=`, `>`, `>=`, `<`, `<=`, `contains`, `matches` (regex), `approx`. Nested property paths supported (`position.x`, `velocity.y`).
+
+### Command Discovery & Schemas
+
+All commands have declarative schemas with descriptions, typed parameters, and metadata:
+
+```bash
+# Search for commands by keyword
+bun ws_send.ts search_commands '{"query":"animation"}'
+
+# Get full schema for a command
+bun ws_send.ts describe_command '{"command":"add_node"}'
+
+# List all commands in a category with schemas
+bun ws_send.ts describe_category '{"category":"scene_handler"}'
+
+# List all commands with descriptions
+bun ws_send.ts list_commands '{"include_schemas":true}'
+```
+
+Required parameters are auto-validated by the router before handlers are called.
+
+### Health Check & Doctor
+
+```bash
+# Quick status — version, scene, bridge, handler counts
+bun ws_send.ts health_check
+
+# Prerequisite validation — checks plugin, WS, bridge, scene
+bun ws_send.ts doctor
+```
+
+### Smart Node Lookup
+
+NodeFinder supports multiple path formats:
+- Standard paths: `Player/Sprite2D`
+- Unique name (`%`): `%Player` (searches entire tree)
+- Type-qualified: `Player:CharacterBody2D` (validates type)
+- Fuzzy matching: on failure, suggests similar node names
+
+### Install Script
+
+```bash
+# Basic install — copy plugin files
+bash skill/install.sh /path/to/godot/project
+
+# Full install — plugin + CLAUDE.md + skill file + wrapper script + runtime bridge
+bash skill/install.sh --full /path/to/godot/project
+
+# Uninstall
+bash skill/install.sh --uninstall /path/to/godot/project
+```
 
 ## AI Asset Generation
 

@@ -18,17 +18,145 @@ func _init(editor: EditorInterface, undo: UndoHelper):
 
 func get_commands() -> Dictionary:
 	return {
-		"add_node": add_node,
-		"delete_node": delete_node,
-		"rename_node": rename_node,
-		"duplicate_node": duplicate_node,
-		"move_node": move_node,
-		"update_property": update_property,
-		"get_node_properties": get_node_properties,
-		"add_resource": add_resource,
-		"set_anchor_preset": set_anchor_preset,
-		"connect_signal": connect_signal_cmd,
-		"disconnect_signal": disconnect_signal_cmd,
+		"add_node": {
+			"handler": add_node,
+			"description": "Add a new node to the scene tree",
+			"params": {
+				"node_type": {"type": "string", "required": true, "description": "Godot class name (e.g., Sprite2D, CharacterBody2D) or script path"},
+				"node_name": {"type": "string", "default": "", "description": "Name for the new node (auto-generated if empty)"},
+				"parent_path": {"type": "string", "default": "", "description": "Path to parent node (empty = scene root)"},
+				"properties": {"type": "dict", "default": {}, "description": "Initial property values to set on the node"},
+			},
+			"metadata": {
+				"undoable": true,
+				"safe_for_batch": true,
+			},
+		},
+		"delete_node": {
+			"handler": delete_node,
+			"description": "Delete a node from the scene tree",
+			"params": {
+				"node_path": {"type": "string", "required": true, "description": "Path to the node to delete"},
+			},
+			"metadata": {
+				"undoable": true,
+				"safe_for_batch": true,
+			},
+		},
+		"rename_node": {
+			"handler": rename_node,
+			"description": "Rename a node in the scene tree",
+			"params": {
+				"node_path": {"type": "string", "required": true, "description": "Path to the node to rename"},
+				"new_name": {"type": "string", "required": true, "description": "New name for the node"},
+			},
+			"metadata": {
+				"undoable": true,
+				"safe_for_batch": true,
+			},
+		},
+		"duplicate_node": {
+			"handler": duplicate_node,
+			"description": "Duplicate a node and all its children",
+			"params": {
+				"node_path": {"type": "string", "required": true, "description": "Path to the node to duplicate"},
+				"new_name": {"type": "string", "default": "", "description": "Name for the duplicated node (auto-generated if empty)"},
+			},
+			"metadata": {
+				"undoable": true,
+				"safe_for_batch": true,
+			},
+		},
+		"move_node": {
+			"handler": move_node,
+			"description": "Move a node to a new parent in the scene tree",
+			"params": {
+				"node_path": {"type": "string", "required": true, "description": "Path to the node to move"},
+				"new_parent_path": {"type": "string", "required": true, "description": "Path to the new parent node"},
+			},
+			"metadata": {
+				"undoable": true,
+				"safe_for_batch": true,
+			},
+		},
+		"update_property": {
+			"handler": update_property,
+			"description": "Set a property value on a node",
+			"params": {
+				"node_path": {"type": "string", "required": true, "description": "Path to the target node"},
+				"property": {"type": "string", "required": true, "description": "Property name to set"},
+				"value": {"type": "any", "required": true, "description": "New value (supports Godot types like Vector2(x,y), Color(r,g,b,a))"},
+			},
+			"metadata": {
+				"undoable": true,
+				"safe_for_batch": true,
+			},
+		},
+		"get_node_properties": {
+			"handler": get_node_properties,
+			"description": "Get all editor-visible properties of a node",
+			"params": {
+				"node_path": {"type": "string", "required": true, "description": "Path to the node"},
+				"filter": {"type": "string", "default": "", "description": "Filter properties by name substring (case-insensitive)"},
+			},
+			"metadata": {
+				"safe_for_batch": true,
+			},
+		},
+		"add_resource": {
+			"handler": add_resource,
+			"description": "Create and assign a new resource to a node property",
+			"params": {
+				"node_path": {"type": "string", "required": true, "description": "Path to the target node"},
+				"property": {"type": "string", "required": true, "description": "Property to assign the resource to"},
+				"resource_type": {"type": "string", "required": true, "description": "Resource class name (e.g., RectangleShape2D, StyleBoxFlat)"},
+				"resource_properties": {"type": "dict", "default": {}, "description": "Properties to set on the new resource"},
+			},
+			"metadata": {
+				"undoable": true,
+				"safe_for_batch": true,
+			},
+		},
+		"set_anchor_preset": {
+			"handler": set_anchor_preset,
+			"description": "Set anchor preset on a Control node (e.g., full rect, center)",
+			"params": {
+				"node_path": {"type": "string", "required": true, "description": "Path to a Control node"},
+				"preset": {"type": "int", "required": true, "description": "Anchor preset enum value (e.g., 15 = full rect)"},
+			},
+			"metadata": {
+				"undoable": true,
+				"safe_for_batch": true,
+			},
+		},
+		"connect_signal": {
+			"handler": connect_signal_cmd,
+			"description": "Connect a signal from one node to a method on another node",
+			"params": {
+				"source_path": {"type": "string", "required": true, "description": "Path to the node emitting the signal"},
+				"signal_name": {"type": "string", "required": true, "description": "Name of the signal to connect"},
+				"target_path": {"type": "string", "required": true, "description": "Path to the node receiving the signal"},
+				"method_name": {"type": "string", "required": true, "description": "Method name to call on the target node"},
+			},
+			"metadata": {
+				"undoable": true,
+				"safe_for_batch": true,
+			},
+		},
+		"disconnect_signal": {
+			"handler": disconnect_signal_cmd,
+			"description": "Disconnect a signal connection between two nodes",
+			"params": {
+				"source_path": {"type": "string", "required": true, "description": "Path to the node emitting the signal"},
+				"signal_name": {"type": "string", "required": true, "description": "Name of the signal to disconnect"},
+				"target_path": {"type": "string", "required": true, "description": "Path to the node receiving the signal"},
+				"method_name": {"type": "string", "required": true, "description": "Method name on the target node"},
+			},
+			"metadata": {
+				"undoable": true,
+				"safe_for_batch": true,
+			},
+		},
 	}
 
 

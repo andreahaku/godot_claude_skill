@@ -11,6 +11,7 @@ extends RefCounted
 var _handlers: Dictionary = {} # command_name -> Callable
 var _categories: Dictionary = {} # command_name -> handler_class_name
 var _command_metadata: Dictionary = {} # command_name -> metadata dict
+var _command_schemas: Dictionary = {} # command_name -> {description, params}
 var _ws: GodotClaudeWS
 var _undo: UndoHelper
 
@@ -34,8 +35,27 @@ func register_all(commands: Dictionary, handler_obj = null) -> void:
 			var script_path: String = handler_obj.get_script().resource_path
 			category = script_path.get_file().get_basename()
 	for cmd in commands:
-		_handlers[cmd] = commands[cmd]
-		_categories[cmd] = category
+		var entry = commands[cmd]
+		if entry is Callable:
+			# Old format: just a callable
+			_handlers[cmd] = entry
+			_categories[cmd] = category
+		elif entry is Dictionary:
+			# New format: schema dict with handler, params, metadata
+			_handlers[cmd] = entry.get("handler")
+			_categories[cmd] = category
+			# Store schema
+			_command_schemas[cmd] = {
+				"description": entry.get("description", ""),
+				"params": entry.get("params", {}),
+			}
+			# Merge metadata
+			var metadata: Dictionary = entry.get("metadata", {})
+			if not _command_metadata.has(cmd):
+				_command_metadata[cmd] = {}
+			_command_metadata[cmd].merge(metadata)
+		else:
+			push_warning("[GodotClaude] Skipping command '%s': entry is neither Callable nor Dictionary" % cmd)
 
 
 func register_metadata(command_name: String, metadata: Dictionary) -> void:
@@ -58,6 +78,18 @@ func handle(id: String, command: String, params: Dictionary) -> void:
 			["Use 'list_commands' to see available commands"]
 		)
 		return
+
+	# Auto-validate if schema exists
+	if _command_schemas.has(command):
+		var validation := _validate_params(command, params)
+		if validation.has("error"):
+			_ws.send_response(
+				peer_id, id, false, null,
+				validation.error,
+				validation.code,
+				validation.get("suggestions", [])
+			)
+			return
 
 	var handler: Callable = _handlers[command]
 	var start_time := Time.get_ticks_msec()
@@ -156,6 +188,14 @@ func _batch_dry_run(commands: Array) -> Dictionary:
 			results.append({"index": i, "command": command, "valid": false, "error": "Unknown command: %s" % command})
 			invalid += 1
 			continue
+
+		# Validate params against schema if available
+		if _command_schemas.has(command):
+			var validation := _validate_params(command, cmd_params)
+			if validation.has("error"):
+				results.append({"index": i, "command": command, "valid": false, "error": validation.error})
+				invalid += 1
+				continue
 
 		var metadata: Dictionary = _command_metadata.get(command, {})
 		results.append({
@@ -357,6 +397,38 @@ func _make_result_entry(index: int, command: String, result) -> Dictionary:
 		return {"index": index, "command": command, "success": true, "result": result}
 	else:
 		return {"index": index, "command": command, "success": true, "result": {"value": result}}
+
+
+## Validate params against command schema. Returns empty dict if valid, or error dict.
+func _validate_params(command: String, params: Dictionary) -> Dictionary:
+	var schema: Dictionary = _command_schemas.get(command, {})
+	var param_schemas: Dictionary = schema.get("params", {})
+
+	for param_name in param_schemas:
+		var param_def: Dictionary = param_schemas[param_name]
+		var required: bool = param_def.get("required", false)
+
+		if required and (not params.has(param_name) or str(params[param_name]) == ""):
+			# Collect all required params for the error message
+			var required_list: Array = []
+			for p in param_schemas:
+				if param_schemas[p].get("required", false):
+					required_list.append(p)
+			return {
+				"error": "Missing required parameter: %s" % param_name,
+				"code": "MISSING_PARAM",
+				"suggestions": ["Required params: %s" % ", ".join(required_list)],
+			}
+
+	return {}
+
+
+func get_command_schema(command_name: String) -> Dictionary:
+	return _command_schemas.get(command_name, {})
+
+
+func get_all_schemas() -> Dictionary:
+	return _command_schemas.duplicate()
 
 
 func get_command_list() -> Array[String]:
