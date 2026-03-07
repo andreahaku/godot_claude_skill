@@ -125,15 +125,12 @@ Claude Code needs two things to control Godot:
 
 #### 3a. The Skill Command File
 
-Copy (or symlink) the skill command file into your project's `.claude/commands/` directory:
+The install script automatically copies the skill command file to `.claude/commands/godot.md` in your project. This gives Claude Code the `/godot` slash command with full documentation of all 194 commands.
 
+If you need to update it manually later:
 ```bash
-# From your Godot project directory:
-mkdir -p .claude/commands
 cp /path/to/godot_claude_skill/.claude/commands/godot.md .claude/commands/godot.md
 ```
-
-This gives Claude Code the `/godot` slash command with full documentation of all 194 commands.
 
 #### 3b. Add CLAUDE.md Instructions (optional but recommended)
 

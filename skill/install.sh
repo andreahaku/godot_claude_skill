@@ -143,17 +143,17 @@ echo "$PLUGIN_VERSION" > "$DEST/.plugin_version"
 
 echo "  [OK] Plugin files installed"
 
+# Always copy skill command file
+mkdir -p "$PROJECT_DIR/.claude/commands"
+cp "$REPO_DIR/.claude/commands/godot.md" "$PROJECT_DIR/.claude/commands/godot.md"
+echo "  [OK] Skill file copied to .claude/commands/godot.md"
+
 # Full install extras
 if [ "$FULL_INSTALL" = true ]; then
     echo ""
     echo "Running full setup..."
 
-    # 1. Copy skill command file
-    mkdir -p "$PROJECT_DIR/.claude/commands"
-    cp "$REPO_DIR/.claude/commands/godot.md" "$PROJECT_DIR/.claude/commands/godot.md"
-    echo "  [OK] Skill file copied to .claude/commands/godot.md"
-
-    # 2. Create/append CLAUDE.md
+    # 1. Create/append CLAUDE.md
     CLAUDE_MD="$PROJECT_DIR/CLAUDE.md"
     # Use a heredoc to avoid quoting issues
     GODOT_SECTION="## Godot Integration
@@ -182,7 +182,7 @@ if [ "$FULL_INSTALL" = true ]; then
         echo "  [OK] Created CLAUDE.md with Godot instructions"
     fi
 
-    # 3. Create wrapper script
+    # 2. Create wrapper script
     WRAPPER="$PROJECT_DIR/godot_send"
     cat > "$WRAPPER" << WRAPPER_EOF
 #!/usr/bin/env bash
@@ -193,7 +193,7 @@ WRAPPER_EOF
     chmod +x "$WRAPPER"
     echo "  [OK] Created wrapper script: ./godot_send"
 
-    # 4. Create .env.example
+    # 3. Create .env.example
     ENV_EXAMPLE="$PROJECT_DIR/.env.example"
     if [ ! -f "$ENV_EXAMPLE" ]; then
         cat > "$ENV_EXAMPLE" << 'ENV_EOF'
@@ -216,7 +216,7 @@ ENV_EOF
         echo "  [--] .env.example already exists (skipped)"
     fi
 
-    # 5. Install runtime bridge autoload
+    # 4. Install runtime bridge autoload
     BRIDGE_DEST="$PROJECT_DIR/autoload"
     mkdir -p "$BRIDGE_DEST"
     cp "$PLUGIN_DIR/runtime_bridge.gd" "$BRIDGE_DEST/runtime_bridge.gd"
@@ -241,7 +241,7 @@ GodotClaudeRuntimeBridge="*res://autoload/runtime_bridge.gd"' "$PROJECT_DIR/proj
         echo "  [--] Runtime bridge autoload already configured (skipped)"
     fi
 
-    # 6. Validate prerequisites
+    # 5. Validate prerequisites
     echo ""
     echo "Checking prerequisites..."
 
