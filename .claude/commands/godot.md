@@ -81,6 +81,13 @@ bun /path/to/godot_claude_skill/skill/generate_audio.ts sfx '{"text":"explosion"
 - `inspect` — Inspect audio asset and manifest. Params: `file` (required — res:// path), `project`
 - `regenerate` — Regenerate audio from manifest entry. Params: `file` (required — res:// path), `project`
 
+Important:
+- the generator may save a different extension than the requested `output` if the provider returns a different real format
+- always use the returned `asset_path` for Godot import/attach
+- use `inspect` to read `godot_import_path`, `format`, and `mime_type`
+- if present, `requested_asset_path` / `requested_file` are only the originally requested values
+- `convert_to:"ogg"` now hard-fails if local FFmpeg cannot encode Vorbis; it does not silently keep an MP3 fallback for that explicit conversion request
+
 ### Audio post-processing (requires ffmpeg)
 - `convert_to` — Convert format: `"ogg"` or `"wav"`
 - `normalize` — Normalize audio levels (boolean)
@@ -88,10 +95,13 @@ bun /path/to/godot_claude_skill/skill/generate_audio.ts sfx '{"text":"explosion"
 
 ### Audio workflow
 1. Generate: `bun generate_audio.ts sfx '{"text":"sword clash","output":"res://audio/sfx/sword.mp3","project":"..."}'`
-2. Import into Godot: `import_audio_asset {"audio_path":"res://audio/sfx/sword.mp3"}`
-3. Attach to node: `attach_audio_stream {"node_path":"Player/SwordSound","audio_path":"res://audio/sfx/sword.mp3","bus":"SFX"}`
+2. Import into Godot using the returned `asset_path` or `inspect.godot_import_path`
+3. Attach to node using that same path: `attach_audio_stream {"node_path":"Player/SwordSound","audio_path":"res://audio/sfx/sword.mp3","bus":"SFX"}`
 
-## Available Commands (194 total, 27 categories)
+Note:
+- `import_audio_asset` performs a short automatic retry/rescan for freshly generated files
+
+## Available Commands (195 total, 27 categories)
 
 ### Project (7)
 - `get_project_info` — Project metadata, file counts, autoloads
@@ -151,7 +161,7 @@ bun /path/to/godot_claude_skill/skill/generate_audio.ts sfx '{"text":"explosion"
 - `compare_screenshots` — Visual diff. Params: `path_a` (str), `path_b` (str), `pixel_threshold` (float, default 0.1 — per-pixel color delta), `max_diff_ratio` (float, default 0.01 — overall mismatch ratio). Legacy: `threshold` maps to both when `pixel_threshold`/`max_diff_ratio` are omitted
 - `execute_editor_script` — Run GDScript in editor. Params: `code` (str — assign to `_result` for return value)
 - `get_signals` — Inspect signal connections. Params: `node_path` (str)
-- `reload_plugin` — Reload plugin. Params: `plugin_name` (str)
+- `reload_plugin` — Reload plugin. Params: `plugin_name` (str), `unsafe_self_reload` (bool, optional). Note: self-reloading `GodotClaudeSkill` from inside its own command handler is intentionally blocked by default because it is operationally fragile; use manual disable/enable from Project Settings > Plugins unless you explicitly opt into the unsafe path.
 - `reload_project` — Restart editor
 - `clear_output` — Clear output panel
 - `get_node_bounds` — Get visual bounds of a node. Params: `node_path` (str)
@@ -184,7 +194,7 @@ Commands in this category use the runtime bridge architecture: when a BridgeServ
 - `click_button_by_text` — Click button. Params: `text` (str) (runtime_only)
 - `wait_for_node` — Wait for node. Params: `node_path` (str), `timeout` (float, default 5.0) (runtime_only)
 - `batch_get_properties` — Bulk read. Params: `queries` (array of {node_path, properties}) (runtime_only)
-- `get_bridge_status` — Check bridge connection status. Params: `trace` (bool, optional — enable/disable command tracing), `include_trace` (bool, optional — include trace log in response), `trace_last` (int, optional — last N entries), `clear_trace` (bool, optional — clear trace log)
+- `get_bridge_status` — Check bridge connection status. Params: `trace` (bool, optional — enable/disable command tracing), `include_trace` (bool, optional — include trace log in response), `trace_last` (int, optional — last N entries), `clear_trace` (bool, optional — clear trace log). Response now also includes `bridge_status` diagnostics such as pending requests, timeouts, last request/response timestamps.
 - `start_recording` — Start input recording on the game side via bridge. Params: `max_events` (int, default 10000), `max_duration` (float, default 300.0). Captures key, mouse, joypad, and action events with timestamps. Requires runtime bridge.
 - `stop_recording` — Stop recording and return captured events. Returns `events_data` array for replay.
 - `replay_recording` — Replay recorded input in the running game. Params: `events` (array — from stop_recording's events_data; defaults to last recording if omitted), `speed` (float, default 1.0). Requires runtime bridge.
@@ -208,13 +218,14 @@ Commands in this category use the runtime bridge architecture: when a BridgeServ
 - `set_blend_tree_node` — Add blend tree node. Params: `node_path` (str), `name` (str), `type` (str), `animation` (str, optional), `connect_to` (str, optional), `connect_port` (int, default 0). Types: `add2`, `blend2`, `time_scale`, `animation`, `one_shot`, `transition`
 - `set_tree_parameter` — Set tree parameter. Params: `node_path` (str), `parameter` (str), `value` (any)
 
-### TileMap (7)
+### TileMap (8)
 - `tilemap_set_cell` — Set single cell. Params: `node_path` (str), `x` (int), `y` (int), `source_id` (int, default 0), `atlas_x` (int, default 0), `atlas_y` (int, default 0), `alternative` (int, default 0)
 - `tilemap_fill_rect` — Fill rectangle. Params: `node_path` (str), `x1` (int), `y1` (int), `x2` (int), `y2` (int), `source_id` (int, default 0), `atlas_x` (int, default 0), `atlas_y` (int, default 0)
 - `tilemap_get_cell` — Read cell. Params: `node_path` (str), `x` (int), `y` (int) — returns source_id, atlas_coords, alternative
 - `tilemap_clear` — Clear all cells. Params: `node_path` (str) — returns cells_removed count
 - `tilemap_get_info` — Get tilemap info (tile_size, sources, used_cells count). Params: `node_path` (str)
 - `tilemap_get_used_cells` — List all occupied cells with coordinates. Params: `node_path` (str)
+- `tilemap_set_tileset` — Assign a TileSet resource to a TileMapLayer. Params: `node_path` (str), `tileset_path` (str)
 - `create_tileset_from_image` — Create TileSet resource from tileset image. Params: `image_path` (str), `tile_size` (int, default 16), `tile_width` (int, defaults to tile_size), `tile_height` (int, defaults to tile_size), `save_path` (str, optional — defaults to image_path with .tres extension), `margin` (int, default 0), `separation` (int, default 0)
 
 ### 3D Scene (6)
@@ -365,8 +376,8 @@ Uses the runtime bridge when connected for live game testing.
 - `describe_category` — Get all commands in a category with descriptions. Params: `category` (str)
 - `search_commands` — Search commands by keyword. Params: `query` (str)
 - `get_version` — Get plugin and Godot version
-- `health_check` — Verify plugin health and handler status
-- `doctor` — Diagnostic report: handler status, command counts, event bus, bridge status
+- `health_check` — Verify plugin health and handler status. Includes detailed WebSocket and bridge server status when available.
+- `doctor` — Diagnostic report: handler status, command counts, WebSocket health, bridge status, and warnings for rejected/pruned peers or pending bridge requests
 - `batch_execute` — Run multiple commands in one request. Params: `commands` (array of {command, params}) — returns {total, succeeded, failed, results}
 - `subscribe` — Subscribe to events. Params: `events` (array of str). Events: `filesystem_changed`, `node_added`, `node_removed`
 - `unsubscribe` — Unsubscribe from all events for current connection (no params)
@@ -461,3 +472,7 @@ These are useful for reviewing changes before committing or understanding what h
 14. Use `create_from_template` / `scaffold_script` to quickly bootstrap common game patterns
 15. Use `doctor` to diagnose plugin issues (handler status, command counts, bridge status)
 16. Use `get_output_log` / `get_runtime_errors` to check for runtime issues without switching to Godot
+17. For rapid multi-command workflows, prefer `bun ws_send.ts --batch` or `batch_execute` over many one-shot WebSocket calls
+18. For interactive sessions, prefer `bun ws_send.ts --listen`; it now sends heartbeat pings to keep the connection alive
+19. Supported broker mode: run `bun skill/ws_broker.ts` in a dedicated terminal and then use `GODOT_USE_BROKER=1 bun skill/ws_send.ts ...` to route one-shot commands through a persistent broker process
+20. When `GODOT_USE_BROKER=1`, `ws_send.ts` returns an explicit broker error instead of silently falling back to the direct WebSocket path

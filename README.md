@@ -1,6 +1,6 @@
 # Godot Claude Skill
 
-A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **194 commands across 27 categories** with full undo/redo support, AI asset/audio generation, runtime bridge for true game introspection, event subscriptions, and structured script patching.
+A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **195 commands across 27 categories** with full undo/redo support, AI asset/audio generation, runtime bridge for true game introspection, event subscriptions, and structured script patching.
 
 ## Architecture
 
@@ -112,7 +112,7 @@ addons/godot_claude_skill/
 3. Find **GodotClaudeSkill** in the list and check **Enable**
 4. Check the **Output** panel — you should see:
    ```
-   [GodotClaude] Ready! 194 commands available on ws://127.0.0.1:9080
+   [GodotClaude] Ready! 195 commands available on ws://127.0.0.1:9080
    ```
 
 If you don't see this message, check:
@@ -125,7 +125,7 @@ Claude Code needs two things to control Godot:
 
 #### 3a. The Skill Command File
 
-The install script automatically copies the skill command file to `.claude/commands/godot.md` in your project. This gives Claude Code the `/godot` slash command with full documentation of all 194 commands.
+The install script automatically copies the skill command file to `.claude/commands/godot.md` in your project. This gives Claude Code the `/godot` slash command with full documentation of all 195 commands.
 
 If you need to update it manually later:
 ```bash
@@ -185,7 +185,7 @@ You: Add a script to the player with basic movement
 Claude: (creates GDScript, attaches it to the player node)
 ```
 
-## Features (27 Categories, 194 Commands)
+## Features (27 Categories, 195 Commands)
 
 | Category | Count | Highlights |
 |---|---|---|
@@ -388,6 +388,19 @@ bun ws_send.ts health_check
 # Prerequisite validation — checks plugin, WS, bridge, scene
 bun ws_send.ts doctor
 ```
+
+Notes:
+- `health_check` now includes detailed WebSocket and bridge diagnostics (active peers, rejected/pruned connections, pending bridge requests, recent disconnect info)
+- `reload_plugin` is intentionally conservative for `GodotClaudeSkill` itself: manual disable/enable from `Project Settings > Plugins` is the supported path for self-reload
+- `skill/ws_send.ts` now retries short transient connection failures by default, which helps during rapid command bursts while the editor socket is recovering
+- for rapid multi-command workflows, prefer a persistent connection:
+  - `--batch` for scripted sequences
+  - `--listen` for interactive sessions
+  - `--listen` now sends periodic heartbeat pings to keep the connection healthy
+- experimental persistent broker support exists via `skill/ws_broker.ts`
+  - validated path: run `bun skill/ws_broker.ts` in a dedicated terminal, then invoke commands with `GODOT_USE_BROKER=1 bun skill/ws_send.ts ...`
+  - supported mode: manual broker foreground process
+  - `ws_send.ts` no longer silently falls back to direct mode when `GODOT_USE_BROKER=1`; it now returns an explicit broker error
 
 ### Smart Node Lookup
 
@@ -712,6 +725,19 @@ bun skill/generate_audio.ts list_presets
 
 Available presets: `adam` (deep male), `alice` (warm female), `aria` (expressive female), `bill` (older male), `brian` (narrator), `charlie` (casual male), `charlotte` (elegant female), `chris` (casual male), `daniel` (British male), `eric` (friendly male), `george` (warm male), `jessica` (young female), `laura` (soft female), `lily` (light female), `roger` (middle-aged male), `sarah` (gentle female).
 
+### Format Safety
+
+The generator now treats the returned file format as authoritative.
+
+- `asset_path` is the real file written to disk and the path you should import in Godot
+- `requested_asset_path` is only what you originally asked for
+- `format` and `mime_type` describe the real stored file
+- `godot_import_path` from `inspect` is the exact path to pass to `import_audio_asset`
+
+If a provider returns MP3 data while you requested `.ogg`, the tool will save a `.mp3` file, warn explicitly, and keep the manifest consistent with the actual file on disk.
+
+If you explicitly request `convert_to:"ogg"`, the command now hard-fails when local FFmpeg cannot encode Vorbis. It does not silently keep an MP3 fallback for that explicit conversion request.
+
 ### Audio Post-Processing
 
 Post-process generated audio with ffmpeg (requires ffmpeg installed):
@@ -743,12 +769,18 @@ bun skill/generate_audio.ts regenerate '{"file":"res://audio/sfx/sword_hit.mp3",
 bun skill/generate_audio.ts list_voices
 ```
 
+Use `inspect` to verify the actual saved format before importing into Godot:
+
+- `file` / `godot_import_path` — real path to use with `import_audio_asset`
+- `format` / `mime_type` — actual stored format
+- `requested_file` / `requested_format` — only present when the requested output differed from the final saved file
+
 ### Godot Integration
 
 After generating audio, use Godot plugin commands to import and wire it into scenes:
 
 ```bash
-# 1. Import the audio asset (triggers Godot rescan)
+# 1. Import the real saved path from `asset_path` or `godot_import_path`
 bun skill/ws_send.ts import_audio_asset '{"audio_path":"res://audio/sfx/sword_hit.mp3"}'
 
 # 2. Ensure the SFX bus exists
@@ -763,6 +795,8 @@ bun skill/ws_send.ts create_audio_randomizer '{"name":"FootstepSfx","parent_path
 # 5. Inspect audio asset details
 bun skill/ws_send.ts get_audio_asset_info '{"audio_path":"res://audio/sfx/sword_hit.mp3"}'
 ```
+
+`import_audio_asset` now does a short automatic retry/rescan for freshly generated files, so the common `generate -> import` workflow is more reliable without a manual delay.
 
 ### Audio Manifests
 
@@ -866,7 +900,7 @@ Error responses:
 godot_claude_skill/
 ├── .claude/
 │   └── commands/
-│       └── godot.md           # Claude Code skill definition (194 commands documented)
+│       └── godot.md           # Claude Code skill definition (195 commands documented)
 ├── godot-plugin/              # Source files for the Godot EditorPlugin
 │   ├── plugin.cfg
 │   ├── godot_claude.gd        # Main plugin entry point
