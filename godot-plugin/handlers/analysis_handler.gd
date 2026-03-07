@@ -2,9 +2,10 @@
 class_name AnalysisHandler
 extends RefCounted
 
-## Code Analysis tools (6):
+## Code Analysis tools (7):
 ## find_unused_resources, analyze_signal_flow, analyze_scene_complexity,
-## find_script_references, detect_circular_dependencies, get_project_statistics
+## find_script_references, detect_circular_dependencies, get_project_statistics,
+## lookup_class
 
 var _editor: EditorInterface
 
@@ -21,6 +22,7 @@ func get_commands() -> Dictionary:
 		"find_script_references": find_script_references,
 		"detect_circular_dependencies": detect_circular_dependencies,
 		"get_project_statistics": get_project_statistics,
+		"lookup_class": lookup_class,
 	}
 
 
@@ -157,6 +159,123 @@ func get_project_statistics(params: Dictionary) -> Dictionary:
 	stats["script_count"] = stats.files.scripts
 
 	return stats
+
+
+func lookup_class(params: Dictionary) -> Dictionary:
+	var class_name_str: String = params.get("class_name", "")
+	if class_name_str == "":
+		return {"error": "class_name parameter is required", "code": "MISSING_PARAM"}
+
+	if not ClassDB.class_exists(class_name_str):
+		# Try to find similar class names
+		var suggestions: Array = []
+		for c in ClassDB.get_class_list():
+			if c.to_lower().contains(class_name_str.to_lower()):
+				suggestions.append(c)
+		return {"error": "Unknown class: %s" % class_name_str, "code": "UNKNOWN_CLASS", "suggestions": suggestions.slice(0, 10)}
+
+	var result: Dictionary = {
+		"class_name": class_name_str,
+		"parent_class": ClassDB.get_parent_class(class_name_str),
+		"is_instantiable": ClassDB.can_instantiate(class_name_str),
+	}
+
+	# Get inheritance chain
+	var chain: Array = []
+	var current = class_name_str
+	while current != "":
+		chain.append(current)
+		current = ClassDB.get_parent_class(current)
+	result["inheritance"] = chain
+
+	var include_inherited: bool = params.get("include_inherited", false)
+	var property_filter: String = params.get("property", "")
+	var method_filter: String = params.get("method", "")
+
+	# Properties
+	if property_filter != "":
+		# Look up a specific property
+		var prop_list = ClassDB.class_get_property_list(class_name_str, !include_inherited)
+		for prop in prop_list:
+			if prop.name == property_filter:
+				result["property"] = {
+					"name": prop.name,
+					"type": type_string(prop.type),
+					"hint": prop.hint,
+					"hint_string": prop.hint_string,
+					"usage": prop.usage,
+				}
+				break
+		if not result.has("property"):
+			result["property_not_found"] = property_filter
+	else:
+		var props: Array = []
+		var prop_list = ClassDB.class_get_property_list(class_name_str, !include_inherited)
+		for prop in prop_list:
+			if prop.usage & PROPERTY_USAGE_EDITOR or prop.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
+				props.append({
+					"name": prop.name,
+					"type": type_string(prop.type),
+				})
+		result["properties"] = props
+
+	# Methods
+	if method_filter != "":
+		var method_list = ClassDB.class_get_method_list(class_name_str, !include_inherited)
+		for m in method_list:
+			if m.name == method_filter:
+				var args: Array = []
+				for arg in m.args:
+					args.append({"name": arg.name, "type": type_string(arg.type)})
+				result["method"] = {
+					"name": m.name,
+					"return_type": type_string(m.return.type) if m.has("return") else "void",
+					"args": args,
+				}
+				break
+		if not result.has("method"):
+			result["method_not_found"] = method_filter
+	else:
+		var methods: Array = []
+		var method_list = ClassDB.class_get_method_list(class_name_str, !include_inherited)
+		for m in method_list:
+			if m.name.begins_with("_"):
+				continue  # Skip private/virtual by default
+			var args: Array = []
+			for arg in m.args:
+				args.append({"name": arg.name, "type": type_string(arg.type)})
+			methods.append({
+				"name": m.name,
+				"args": args,
+			})
+		result["methods"] = methods
+
+	# Signals
+	var signals: Array = []
+	var signal_list = ClassDB.class_get_signal_list(class_name_str, !include_inherited)
+	for sig in signal_list:
+		var args: Array = []
+		for arg in sig.args:
+			args.append({"name": arg.name, "type": type_string(arg.type)})
+		signals.append({
+			"name": sig.name,
+			"args": args,
+		})
+	result["signals"] = signals
+
+	# Enums (if any)
+	var enum_list = ClassDB.class_get_enum_list(class_name_str, !include_inherited)
+	if not enum_list.is_empty():
+		var enums: Dictionary = {}
+		for enum_name in enum_list:
+			var constants = ClassDB.class_get_enum_constants(class_name_str, enum_name, !include_inherited)
+			var values: Dictionary = {}
+			for const_name in constants:
+				values[const_name] = ClassDB.class_get_integer_constant(class_name_str, const_name)
+			enums[enum_name] = values
+		result["enums"] = enums
+
+	return result
 
 
 func _collect_files(path: String, extensions: Array, results: Array, depth: int = 0, max_depth: int = 32) -> void:

@@ -2,10 +2,10 @@
 class_name NodeHandler
 extends RefCounted
 
-## Node tools (11):
+## Node tools (12):
 ## add_node, delete_node, rename_node, duplicate_node, move_node,
 ## update_property, get_node_properties, add_resource,
-## set_anchor_preset, connect_signal, disconnect_signal
+## set_anchor_preset, connect_signal, disconnect_signal, auto_connect_signals
 
 var _editor: EditorInterface
 var _undo: UndoHelper
@@ -151,6 +151,19 @@ func get_commands() -> Dictionary:
 				"signal_name": {"type": "string", "required": true, "description": "Name of the signal to disconnect"},
 				"target_path": {"type": "string", "required": true, "description": "Path to the node receiving the signal"},
 				"method_name": {"type": "string", "required": true, "description": "Method name on the target node"},
+			},
+			"metadata": {
+				"undoable": true,
+				"safe_for_batch": true,
+			},
+		},
+		"auto_connect_signals": {
+			"handler": auto_connect_signals,
+			"description": "Scan a node's children and auto-connect common signal patterns (Button.pressed, Area2D.body_entered, Timer.timeout) to method stubs on the nearest scripted ancestor",
+			"params": {
+				"node_path": {"type": "string", "default": "", "description": "Path to scan (empty = scene root)"},
+				"create_stubs": {"type": "bool", "default": true, "description": "Whether to create method stub code in the target script"},
+				"dry_run": {"type": "bool", "default": false, "description": "If true, only report what would be connected without making changes"},
 			},
 			"metadata": {
 				"undoable": true,
@@ -515,6 +528,149 @@ func disconnect_signal_cmd(params: Dictionary) -> Dictionary:
 	_undo.commit_action()
 
 	return {"disconnected": true, "source": source_path, "signal": signal_name, "target": target_path, "method": method_name}
+
+
+func auto_connect_signals(params: Dictionary) -> Dictionary:
+	var node_path: String = params.get("node_path", "")
+	var create_stubs: bool = params.get("create_stubs", true)
+	var dry_run: bool = params.get("dry_run", false)
+
+	var root = NodeFinder.get_root(_editor)
+	if root == null:
+		return {"error": "No scene is currently open", "code": "NO_SCENE"}
+
+	var target_node = NodeFinder.find(_editor, node_path) if node_path != "" else root
+	if target_node == null:
+		return {"error": "Node not found: %s" % node_path, "code": "NODE_NOT_FOUND"}
+
+	# Find nearest ancestor (or self) with a script attached
+	var scripted_node: Node = null
+	var check = target_node
+	while check != null:
+		if check.get_script() != null:
+			scripted_node = check
+			break
+		check = check.get_parent()
+
+	if scripted_node == null:
+		return {"error": "No scripted ancestor found for node: %s" % node_path, "code": "NO_SCRIPT"}
+
+	var script: GDScript = scripted_node.get_script() as GDScript
+	if script == null:
+		return {"error": "Script on node is not a GDScript", "code": "WRONG_SCRIPT_TYPE"}
+
+	var script_path: String = script.resource_path
+
+	# Scan children for connectable signals
+	var scan_results: Array = []
+	_scan_connectable_signals(target_node, scan_results)
+
+	if scan_results.is_empty():
+		return {"connections": [], "stubs_created": [], "message": "No connectable signals found"}
+
+	# Read existing script source to check for existing methods
+	var script_source: String = script.source_code if script.source_code != "" else ""
+	if script_source == "" and FileAccess.file_exists(script_path):
+		var f = FileAccess.open(script_path, FileAccess.READ)
+		if f:
+			script_source = f.get_as_text()
+			f.close()
+
+	var connections_made: Array = []
+	var stubs_created: Array = []
+	var skipped: Array = []
+	var stubs_to_add: String = ""
+
+	for entry in scan_results:
+		var child_node: Node = entry["node"]
+		var signal_name: String = entry["signal"]
+		var method_name: String = "_on_%s_%s" % [_to_snake_case(str(child_node.name)), signal_name]
+
+		# Check if signal is already connected to this method
+		if child_node.is_connected(signal_name, Callable(scripted_node, method_name)):
+			skipped.append({"node": str(root.get_path_to(child_node)), "signal": signal_name, "reason": "already_connected"})
+			continue
+
+		var connection_info := {
+			"node": str(root.get_path_to(child_node)),
+			"signal": signal_name,
+			"method": method_name,
+			"target": str(root.get_path_to(scripted_node)),
+		}
+
+		if dry_run:
+			connections_made.append(connection_info)
+			if not script_source.contains("func %s(" % method_name):
+				stubs_created.append(method_name)
+			continue
+
+		# Connect the signal via undo system
+		_undo.create_action("Auto-connect: %s.%s -> %s" % [child_node.name, signal_name, method_name])
+		_undo.add_do_method(child_node, &"connect", [signal_name, Callable(scripted_node, method_name)])
+		_undo.add_undo_method(child_node, &"disconnect", [signal_name, Callable(scripted_node, method_name)])
+		_undo.commit_action()
+
+		connections_made.append(connection_info)
+
+		# Build method stub if needed
+		if create_stubs and not script_source.contains("func %s(" % method_name):
+			var stub: String = ""
+			if signal_name == "body_entered":
+				var body_type := "Node2D" if child_node is Area2D else "Node3D"
+				stub = "\n\nfunc %s(%s: %s) -> void:\n\tpass" % [method_name, "body", body_type]
+			else:
+				stub = "\n\nfunc %s() -> void:\n\tpass" % method_name
+			stubs_to_add += stub
+			stubs_created.append(method_name)
+
+	# Write stubs to script file
+	if not dry_run and stubs_to_add != "":
+		if FileAccess.file_exists(script_path):
+			var f = FileAccess.open(script_path, FileAccess.READ)
+			if f:
+				script_source = f.get_as_text()
+				f.close()
+			f = FileAccess.open(script_path, FileAccess.WRITE)
+			if f:
+				f.store_string(script_source + stubs_to_add + "\n")
+				f.close()
+				# Reload the script so Godot picks up changes
+				script.reload()
+
+	var result := {
+		"connections": connections_made,
+		"stubs_created": stubs_created,
+		"skipped": skipped,
+		"target_script": script_path,
+	}
+	if dry_run:
+		result["dry_run"] = true
+	return result
+
+
+func _to_snake_case(s: String) -> String:
+	var result := ""
+	for i in s.length():
+		var c = s[i]
+		if c == c.to_upper() and c != c.to_lower() and i > 0:
+			result += "_"
+		result += c.to_lower()
+	return result
+
+
+func _scan_connectable_signals(node: Node, results: Array, depth: int = 0, max_depth: int = 32) -> void:
+	if depth >= max_depth:
+		return
+	for child in node.get_children():
+		if child is BaseButton:
+			results.append({"node": child, "signal": "pressed"})
+		if child is Area2D:
+			results.append({"node": child, "signal": "body_entered"})
+		if child is Area3D:
+			results.append({"node": child, "signal": "body_entered"})
+		if child is Timer:
+			results.append({"node": child, "signal": "timeout"})
+		_scan_connectable_signals(child, results, depth + 1, max_depth)
 
 
 func _set_owner_recursive(node: Node, owner: Node) -> void:

@@ -66,6 +66,7 @@ func _enter_tree() -> void:
 		[ProfilingHandler, [ei]],
 		[AssetHandler, [ei, _undo]],
 		[ExportHandler, [ei]],
+		[TemplateHandler, [ei, _undo]],
 	]
 
 	for config in handler_configs:

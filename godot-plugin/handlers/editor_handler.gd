@@ -2,10 +2,11 @@
 class_name EditorHandler
 extends RefCounted
 
-## Editor tools (9):
+## Editor tools (12):
 ## get_editor_errors, get_editor_screenshot, get_game_screenshot,
 ## compare_screenshots, execute_editor_script, get_signals,
-## reload_plugin, reload_project, clear_output
+## reload_plugin, reload_project, clear_output,
+## get_node_bounds, get_scene_summary, get_viewport_info
 
 var _editor: EditorInterface
 var _plugin: EditorPlugin
@@ -27,6 +28,9 @@ func get_commands() -> Dictionary:
 		"reload_plugin": reload_plugin,
 		"reload_project": reload_project,
 		"clear_output": clear_output,
+		"get_node_bounds": get_node_bounds,
+		"get_scene_summary": get_scene_summary,
+		"get_viewport_info": get_viewport_info,
 	}
 
 
@@ -237,3 +241,116 @@ func clear_output(params: Dictionary) -> Dictionary:
 	# Clear the editor output panel if accessible
 	# This is limited in Godot's API; we clear what we can
 	return {"cleared": true}
+
+
+func get_node_bounds(params: Dictionary) -> Dictionary:
+	var node_path: String = params.get("node_path", "")
+	if node_path == "":
+		return {"error": "node_path parameter is required", "code": "MISSING_PARAM"}
+
+	var node = NodeFinder.find(_editor, node_path)
+	if node == null:
+		return {"error": "Node not found: %s" % node_path, "code": "NODE_NOT_FOUND"}
+
+	var result: Dictionary = {
+		"node_path": str(node.get_path()),
+		"node_type": node.get_class(),
+	}
+
+	if node is Control:
+		var rect = node.get_global_rect()
+		result["global_position"] = TypeParser.value_to_json(node.global_position)
+		result["size"] = TypeParser.value_to_json(node.size)
+		result["global_rect"] = TypeParser.value_to_json(rect)
+	elif node is Node2D:
+		result["global_position"] = TypeParser.value_to_json(node.global_position)
+		if node is Sprite2D and node.texture != null:
+			var tex_size = node.texture.get_size()
+			result["texture_size"] = TypeParser.value_to_json(tex_size)
+			result["bounds"] = TypeParser.value_to_json(Rect2(node.global_position - tex_size / 2.0, tex_size))
+		elif node.has_method("get_rect"):
+			result["rect"] = TypeParser.value_to_json(node.get_rect())
+	elif node is Node3D:
+		result["global_position"] = TypeParser.value_to_json(node.global_position)
+
+	return result
+
+
+func get_scene_summary(params: Dictionary) -> Dictionary:
+	var root = _editor.get_edited_scene_root()
+	if root == null:
+		return {"error": "No scene is currently open", "code": "NO_SCENE"}
+
+	var max_depth: int = params.get("max_depth", 8)
+	var include_properties: Array = params.get("include_properties", ["position", "size", "visible", "modulate"])
+
+	var nodes: Array = []
+	_collect_scene_nodes(root, root, 0, max_depth, include_properties, nodes)
+
+	return {"nodes": nodes, "node_count": nodes.size()}
+
+
+func _collect_scene_nodes(node: Node, root: Node, depth: int, max_depth: int, properties: Array, out: Array) -> void:
+	if depth > max_depth:
+		return
+
+	var entry: Dictionary = {
+		"path": str(root.get_path_to(node)),
+		"type": node.get_class(),
+	}
+
+	for prop_name in properties:
+		if node.has_method("get") or prop_name in node:
+			var val = node.get(prop_name)
+			if val != null:
+				entry[prop_name] = TypeParser.value_to_json(val)
+
+	out.append(entry)
+
+	for child in node.get_children():
+		_collect_scene_nodes(child, root, depth + 1, max_depth, properties, out)
+
+
+func get_viewport_info(params: Dictionary) -> Dictionary:
+	var root = _editor.get_edited_scene_root()
+	var result: Dictionary = {}
+
+	# Editor viewport info
+	var main_screen = _editor.get_editor_main_screen()
+	if main_screen != null:
+		var vp = main_screen.get_viewport()
+		if vp != null:
+			result["viewport_size"] = TypeParser.value_to_json(vp.get_visible_rect().size)
+
+	if root != null:
+		result["scene_path"] = root.scene_file_path
+
+		# Find cameras in the scene
+		var cameras: Array = []
+		_find_cameras(root, root, cameras)
+		result["cameras"] = cameras
+	else:
+		result["scene_path"] = ""
+		result["cameras"] = []
+
+	return result
+
+
+func _find_cameras(node: Node, root: Node, out: Array) -> void:
+	if node is Camera2D:
+		out.append({
+			"path": str(root.get_path_to(node)),
+			"type": "Camera2D",
+			"position": TypeParser.value_to_json(node.global_position),
+			"zoom": TypeParser.value_to_json(node.zoom),
+		})
+	elif node is Camera3D:
+		out.append({
+			"path": str(root.get_path_to(node)),
+			"type": "Camera3D",
+			"position": TypeParser.value_to_json(node.global_position),
+			"fov": node.fov,
+		})
+
+	for child in node.get_children():
+		_find_cameras(child, root, out)

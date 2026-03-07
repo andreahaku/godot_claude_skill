@@ -1,6 +1,6 @@
 # Godot Claude Skill
 
-A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **161 commands across 25 categories** with full undo/redo support, AI asset generation, runtime bridge for true game introspection, and structured script patching.
+A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **169 commands across 26 categories** with full undo/redo support, AI asset generation, runtime bridge for true game introspection, and structured script patching.
 
 ## Architecture
 
@@ -11,7 +11,7 @@ A comprehensive Claude Code skill for controlling the Godot game engine editor i
 │  skill/         │     :9080          │  godot-plugin/       │
 │  ws_send.ts     │                    │  godot_claude.gd     │
 │  generate_asset │  JSON commands     │  command_router.gd   │
-└─────────────────┘                    │  24 handlers         │
+└─────────────────┘                    │  25 handlers         │
                                        │  bridge_server.gd    │
                                        └──────────┬───────────┘
                                                    │ ws://127.0.0.1:9081
@@ -111,7 +111,7 @@ addons/godot_claude_skill/
 3. Find **GodotClaudeSkill** in the list and check **Enable**
 4. Check the **Output** panel — you should see:
    ```
-   [GodotClaude] Ready! 161 commands available on ws://127.0.0.1:9080
+   [GodotClaude] Ready! 169 commands available on ws://127.0.0.1:9080
    ```
 
 If you don't see this message, check:
@@ -132,7 +132,7 @@ mkdir -p .claude/commands
 cp /path/to/godot_claude_skill/.claude/commands/godot.md .claude/commands/godot.md
 ```
 
-This gives Claude Code the `/godot` slash command with full documentation of all 161 commands.
+This gives Claude Code the `/godot` slash command with full documentation of all 169 commands.
 
 #### 3b. Add CLAUDE.md Instructions (optional but recommended)
 
@@ -187,15 +187,15 @@ You: Add a script to the player with basic movement
 Claude: (creates GDScript, attaches it to the player node)
 ```
 
-## Features (25 Categories, 161 Commands)
+## Features (26 Categories, 169 Commands)
 
 | Category | Count | Highlights |
 |---|---|---|
 | **Project** | 7 | Metadata, file tree, search, settings, UID management |
 | **Scene** | 9 | Live hierarchy, create/open/save/delete, play/stop, instancing |
-| **Node** | 11 | Add/delete/rename/duplicate/move, properties, resources, signals |
+| **Node** | 12 | Add/delete/rename/duplicate/move, properties, resources, signals, auto-connect |
 | **Script** | 10 | List/read/create/edit/patch, attach, validate, diagnostics |
-| **Editor** | 9 | Errors, screenshots, visual diff, execute GDScript, signals |
+| **Editor** | 12 | Errors, screenshots, visual diff, execute GDScript, signals, node bounds, scene summary, viewport info |
 | **Input Simulation** | 5 | Keyboard, mouse, InputActions, multi-event sequences with waits |
 | **Runtime Analysis** | 16 | Live game tree via runtime bridge, properties, execute code, capture frames, recording, bridge status |
 | **Animation** | 6 | Create/edit animations, tracks, keyframes |
@@ -211,10 +211,11 @@ Claude: (creates GDScript, attaches it to the player node)
 | **Resource** | 3 | Read/edit/create .tres files of any type |
 | **Batch & Refactoring** | 6 | Find by type, audit signals, bulk property changes, cross-scene |
 | **Testing & QA** | 5 | Automated test scenarios, assertions, stress testing |
-| **Code Analysis** | 6 | Unused resources, signal flow, complexity, circular deps |
+| **Code Analysis** | 7 | Unused resources, signal flow, complexity, circular deps, ClassDB lookup |
 | **Profiling** | 4 | FPS, memory, render metrics, snapshot history with trend analysis |
 | **Asset Management** | 6 | Sprite textures, sprite frames from spritesheets, atlas textures, import presets, NinePatch |
 | **Export** | 3 | Presets, export commands, template info |
+| **Templates** | 3 | Scene templates (12 prefabs), GDScript scaffolding (10 script templates), list templates |
 | **Meta** | 9 | List/describe/search commands, health check, doctor, version info, batch execute |
 
 ## Key Features
@@ -392,6 +393,55 @@ bash skill/install.sh --full /path/to/godot/project
 
 # Uninstall
 bash skill/install.sh --uninstall /path/to/godot/project
+```
+
+### Scene Templates & Script Scaffolding
+
+Create complete node hierarchies from templates instead of adding nodes one at a time:
+
+```bash
+# Create a full platformer player (CharacterBody2D + Sprite2D + CollisionShape2D + AnimationPlayer + Camera2D)
+bun ws_send.ts create_from_template '{"template":"platformer_player","name":"Player"}'
+
+# Create a UI menu with buttons
+bun ws_send.ts create_from_template '{"template":"ui_menu","parent_path":"UI"}'
+
+# Generate and attach a movement script
+bun ws_send.ts scaffold_script '{"node_path":"Player","template":"platformer_movement","params":{"speed":250,"jump_force":-450}}'
+
+# List all available templates
+bun ws_send.ts list_templates
+```
+
+12 scene templates: `platformer_player`, `top_down_player`, `enemy_basic`, `ui_hud`, `ui_menu`, `rigid_body_2d`, `area_trigger`, `audio_manager`, `camera_follow`, `parallax_bg`, `character_3d`, `lighting_3d`
+
+10 script templates: `platformer_movement`, `top_down_movement`, `state_machine`, `health_system`, `inventory`, `dialogue_trigger`, `enemy_patrol`, `camera_shake`, `save_load`, `audio_manager`
+
+### Signal Auto-Wiring
+
+Automatically connect common signals and create method stubs:
+
+```bash
+# Scan children and auto-connect Button.pressed, Area2D.body_entered, Timer.timeout
+bun ws_send.ts auto_connect_signals '{"node_path":"UI"}'
+
+# Dry run — see what would be connected without making changes
+bun ws_send.ts auto_connect_signals '{"node_path":"","dry_run":true}'
+```
+
+### ClassDB Lookup
+
+Query Godot's built-in class documentation directly:
+
+```bash
+# Get properties, methods, signals for a class
+bun ws_send.ts lookup_class '{"class_name":"CharacterBody2D"}'
+
+# Look up a specific property
+bun ws_send.ts lookup_class '{"class_name":"Sprite2D","property":"texture"}'
+
+# Include inherited members
+bun ws_send.ts lookup_class '{"class_name":"Button","include_inherited":true}'
 ```
 
 ## AI Asset Generation
@@ -576,7 +626,7 @@ Error responses:
 godot_claude_skill/
 ├── .claude/
 │   └── commands/
-│       └── godot.md           # Claude Code skill definition (161 commands documented)
+│       └── godot.md           # Claude Code skill definition (169 commands documented)
 ├── godot-plugin/              # Source files for the Godot EditorPlugin
 │   ├── plugin.cfg
 │   ├── godot_claude.gd        # Main plugin entry point
