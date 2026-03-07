@@ -39,8 +39,9 @@ func find_nodes_by_type(params: Dictionary) -> Dictionary:
 
 	var start = NodeFinder.find(_editor, search_path) if search_path != "" else root
 	var found: Array = []
-	_find_by_type(start, type_name, found, root)
-	return {"nodes": found, "count": found.size()}
+	var max_depth: int = params.get("max_depth", 64)
+	_find_by_type(start, type_name, found, root, 0, max_depth)
+	return {"nodes": found, "count": found.size(), "max_depth": max_depth}
 
 
 func find_signal_connections(params: Dictionary) -> Dictionary:
@@ -51,8 +52,9 @@ func find_signal_connections(params: Dictionary) -> Dictionary:
 
 	var start = NodeFinder.find(_editor, node_path) if node_path != "" else root
 	var connections: Array = []
-	_audit_signals(start, connections, root)
-	return {"connections": connections, "count": connections.size()}
+	var max_depth: int = params.get("max_depth", 64)
+	_audit_signals(start, connections, root, 0, max_depth)
+	return {"connections": connections, "count": connections.size(), "max_depth": max_depth}
 
 
 func batch_set_property(params: Dictionary) -> Dictionary:
@@ -105,9 +107,10 @@ func find_node_references(params: Dictionary) -> Dictionary:
 	if search_text == "":
 		return {"error": "search is required", "code": "MISSING_PARAM"}
 
+	var max_depth: int = params.get("max_depth", 32)
 	var results: Array = []
-	_search_in_files("res://", search_text, file_types, results, max_results)
-	return {"results": results, "count": results.size()}
+	_search_in_files("res://", search_text, file_types, results, max_results, 0, max_depth)
+	return {"results": results, "count": results.size(), "max_depth": max_depth}
 
 
 func get_scene_dependencies(params: Dictionary) -> Dictionary:
@@ -140,6 +143,7 @@ func cross_scene_set_property(params: Dictionary) -> Dictionary:
 		return {"error": "scene_paths and property are required", "code": "MISSING_PARAM"}
 
 	var parsed = TypeParser.parse_value(value)
+	var max_depth: int = params.get("max_depth", 64)
 	var results: Array = []
 
 	for sp in scene_paths:
@@ -158,7 +162,7 @@ func cross_scene_set_property(params: Dictionary) -> Dictionary:
 
 		var instance = packed.instantiate()
 		var modified: Array = [0]
-		_set_property_recursive(instance, node_type, property, parsed, modified)
+		_set_property_recursive(instance, node_type, property, parsed, modified, 0, max_depth)
 
 		# Re-pack and save
 		var new_packed = PackedScene.new()
@@ -172,18 +176,20 @@ func cross_scene_set_property(params: Dictionary) -> Dictionary:
 	return {"results": results}
 
 
-func _find_by_type(node: Node, type_name: String, results: Array, scene_root: Node) -> void:
+func _find_by_type(node: Node, type_name: String, results: Array, scene_root: Node, depth: int = 0, max_depth: int = 64) -> void:
 	if node.is_class(type_name) or node.get_class() == type_name:
 		results.append({
 			"name": str(node.name),
 			"type": node.get_class(),
 			"path": str(scene_root.get_path_to(node)),
 		})
+	if depth >= max_depth:
+		return
 	for child in node.get_children():
-		_find_by_type(child, type_name, results, scene_root)
+		_find_by_type(child, type_name, results, scene_root, depth + 1, max_depth)
 
 
-func _audit_signals(node: Node, results: Array, scene_root: Node) -> void:
+func _audit_signals(node: Node, results: Array, scene_root: Node, depth: int = 0, max_depth: int = 64) -> void:
 	for sig in node.get_signal_list():
 		var conns = node.get_signal_connection_list(sig.name)
 		for conn in conns:
@@ -193,12 +199,16 @@ func _audit_signals(node: Node, results: Array, scene_root: Node) -> void:
 				"target": str(scene_root.get_path_to(conn.callable.get_object())) if conn.callable.get_object() is Node else str(conn.callable.get_object()),
 				"method": conn.callable.get_method(),
 			})
+	if depth >= max_depth:
+		return
 	for child in node.get_children():
-		_audit_signals(child, results, scene_root)
+		_audit_signals(child, results, scene_root, depth + 1, max_depth)
 
 
-func _search_in_files(path: String, search: String, file_types: Array, results: Array, max_results: int) -> void:
+func _search_in_files(path: String, search: String, file_types: Array, results: Array, max_results: int, depth: int = 0, max_depth: int = 32) -> void:
 	if results.size() >= max_results:
+		return
+	if depth >= max_depth:
 		return
 
 	var dir = DirAccess.open(path)
@@ -213,7 +223,7 @@ func _search_in_files(path: String, search: String, file_types: Array, results: 
 			continue
 		var full_path = path.path_join(file_name)
 		if dir.current_is_dir():
-			_search_in_files(full_path, search, file_types, results, max_results)
+			_search_in_files(full_path, search, file_types, results, max_results, depth + 1, max_depth)
 		else:
 			var ext = file_name.get_extension().to_lower()
 			if ext in file_types:
@@ -232,10 +242,12 @@ func _search_in_files(path: String, search: String, file_types: Array, results: 
 	dir.list_dir_end()
 
 
-func _set_property_recursive(node: Node, type_filter: String, property: String, value: Variant, modified: Array) -> void:
+func _set_property_recursive(node: Node, type_filter: String, property: String, value: Variant, modified: Array, depth: int = 0, max_depth: int = 64) -> void:
 	if type_filter == "" or node.is_class(type_filter):
 		if property in node:
 			node.set(property, value)
 			modified[0] += 1
+	if depth >= max_depth:
+		return
 	for child in node.get_children():
-		_set_property_recursive(child, type_filter, property, value, modified)
+		_set_property_recursive(child, type_filter, property, value, modified, depth + 1, max_depth)

@@ -1,20 +1,30 @@
 # Godot Claude Skill
 
-A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **161 commands across 25 categories** with full undo/redo support and AI asset generation.
+A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **163 commands across 25 categories** with full undo/redo support, AI asset generation, runtime bridge for true game introspection, and structured script patching.
 
 ## Architecture
 
 ```
 ┌─────────────────┐     WebSocket      ┌──────────────────────┐
 │   Claude Code   │◄──────────────────►│  Godot Editor Plugin │
-│                 │   ws://127.0.0.1   │                      │
-│  skill/         │      :9080         │  godot-plugin/       │
+│                 │  ws://127.0.0.1    │                      │
+│  skill/         │     :9080          │  godot-plugin/       │
 │  ws_send.ts     │                    │  godot_claude.gd     │
-│  generate_asset │  JSON commands     │  24 handlers          │
-└─────────────────┘                    └──────────────────────┘
+│  generate_asset │  JSON commands     │  command_router.gd   │
+└─────────────────┘                    │  24 handlers         │
+                                       │  bridge_server.gd    │
+                                       └──────────┬───────────┘
+                                                   │ ws://127.0.0.1:9081
+                                       ┌───────────▼───────────┐
+                                       │   Running Game        │
+                                       │   runtime_bridge.gd   │
+                                       │   (autoload)          │
+                                       └───────────────────────┘
 ```
 
 The plugin runs **inside the Godot editor** as an EditorPlugin with a WebSocket server. Claude Code sends JSON commands via `ws_send.ts`, and the plugin executes them with full access to the editor API.
+
+A separate **runtime bridge** (port 9081) connects the running game process back to the editor, enabling true game-side introspection — scene tree inspection, property manipulation, input injection, and screenshot capture from the actual game viewport.
 
 ## Prerequisites
 
@@ -84,6 +94,8 @@ addons/godot_claude_skill/
 │   ├── theme_handler.gd
 │   ├── tilemap_handler.gd
 │   └── ... (analysis, asset, export, profiling, resource, testing)
+├── bridge_server.gd        # Editor-side bridge server (port 9081)
+├── runtime_bridge.gd       # Game-side autoload for runtime introspection
 └── utils/
     ├── node_finder.gd      # Shared node lookup utility
     ├── type_parser.gd      # Smart type parsing (Vector2, Color, etc.)
@@ -97,7 +109,7 @@ addons/godot_claude_skill/
 3. Find **GodotClaudeSkill** in the list and check **Enable**
 4. Check the **Output** panel — you should see:
    ```
-   [GodotClaude] Ready! 161 commands available on ws://127.0.0.1:9080
+   [GodotClaude] Ready! 163 commands available on ws://127.0.0.1:9080
    ```
 
 If you don't see this message, check:
@@ -118,7 +130,7 @@ mkdir -p .claude/commands
 cp /path/to/godot_claude_skill/.claude/commands/godot.md .claude/commands/godot.md
 ```
 
-This gives Claude Code the `/godot` slash command with full documentation of all 161 commands.
+This gives Claude Code the `/godot` slash command with full documentation of all 163 commands.
 
 #### 3b. Add CLAUDE.md Instructions (optional but recommended)
 
@@ -180,10 +192,10 @@ Claude: (creates GDScript, attaches it to the player node)
 | **Project** | 7 | Metadata, file tree, search, settings, UID management |
 | **Scene** | 9 | Live hierarchy, create/open/save/delete, play/stop, instancing |
 | **Node** | 11 | Add/delete/rename/duplicate/move, properties, resources, signals |
-| **Script** | 6 | List/read/create/edit, attach to nodes, editor awareness |
+| **Script** | 10 | List/read/create/edit/patch, attach, validate, diagnostics |
 | **Editor** | 9 | Errors, screenshots, visual diff, execute GDScript, signals |
 | **Input Simulation** | 5 | Keyboard, mouse, InputActions, multi-event sequences with waits |
-| **Runtime Analysis** | 15 | Live game tree, properties, execute code, capture frames, recording |
+| **Runtime Analysis** | 16 | Live game tree via runtime bridge, properties, execute code, capture frames, recording, bridge status |
 | **Animation** | 6 | Create/edit animations, tracks, keyframes |
 | **AnimationTree** | 8 | State machines, transitions, blend trees, parameters |
 | **TileMap** | 6 | Set/get cells, fill rects, tile set info |
@@ -210,7 +222,7 @@ Claude: (creates GDScript, attaches it to the player node)
 Every scene mutation goes through Godot's `EditorUndoRedoManager`. This means:
 - All changes can be undone with **Ctrl+Z** in the editor
 - The undo history is properly named (e.g., "Add Node: Player", "Set Position")
-- Batch operations create single undo actions
+- Batch operations support `atomic_if_supported` mode for single undo actions
 
 ### Smart Type Parsing
 
@@ -258,11 +270,17 @@ printf '{"command":"add_node","params":{"node_name":"A","node_type":"Node2D"}}
 # [1/2] add_node: OK
 # [2/2] add_node: OK
 
-# Server-side batch — single WebSocket message, multiple commands
-bun skill/ws_send.ts batch_execute '{"commands":[
+# Server-side batch with mode — fail_fast stops on first error
+bun skill/ws_send.ts batch_execute '{"mode":"fail_fast","commands":[
   {"command":"add_node","params":{"node_name":"A","node_type":"Node2D"}},
   {"command":"update_property","params":{"node_path":"A","property":"position","value":"Vector2(100,200)"}}
 ]}'
+
+# Dry run — validate commands without executing
+bun skill/ws_send.ts batch_execute '{"mode":"dry_run","commands":[...]}'
+
+# Atomic — wrap in single undo action, rollback on failure
+bun skill/ws_send.ts batch_execute '{"mode":"atomic_if_supported","commands":[...]}'
 
 # Verbose mode — show raw WebSocket messages (useful for debugging)
 bun skill/ws_send.ts --verbose get_scene_tree
@@ -273,13 +291,55 @@ bun skill/ws_send.ts --listen
 # > add_node {"node_name":"Foo","node_type":"Node2D"}
 ```
 
-### Runtime Analysis
+### Runtime Bridge
 
-Inspect and modify the running game in real-time:
-- `get_game_scene_tree` — live scene hierarchy
+The runtime bridge provides true game-side introspection by running an autoload script inside the game process that connects back to the editor via WebSocket (port 9081):
+
+- `get_game_scene_tree` — live scene hierarchy from the actual game process
+- `get_game_node_properties` / `set_game_node_properties` — read/write game node state
 - `monitor_properties` — track property changes over time
 - `execute_game_script` — run arbitrary GDScript in the game context
-- `capture_frames` — multi-frame screenshot capture
+- `capture_frames` — screenshot from the game viewport (not the editor)
+- `find_ui_elements` / `click_button_by_text` — interact with game UI
+- `get_bridge_status` — check bridge connection status
+
+When the bridge is not connected, commands fall back to the editor tree with a `_fallback` flag.
+
+### Structured Script Patching
+
+The `patch_script` command provides safe, structured script editing with stale-edit detection:
+
+```bash
+bun ws_send.ts patch_script '{"path":"res://player.gd","operations":[
+  {"type":"replace_exact_block","search":"var speed = 100","replace":"var speed = 200"},
+  {"type":"insert_after_marker","marker":"extends CharacterBody2D","content":"\\n@export var jump_force := 400.0"}
+]}'
+```
+
+Operations: `replace_range`, `replace_exact_block`, `insert_before_marker`, `insert_after_marker`, `append_to_class`. Supports `expected_hash` for conflict detection.
+
+### Script Validation
+
+Validate scripts for compilation errors:
+- `validate_script` — check a single script
+- `validate_scripts` — batch validate all scripts under a path
+- `get_script_diagnostics` — detailed diagnostics (dependencies, warnings, hash)
+
+### Testing with Assertion Operators
+
+Enhanced test scenarios with 10 step types and rich assertions:
+
+```bash
+bun ws_send.ts run_test_scenario '{"name":"Jump Test","steps":[
+  {"type":"input_action","action":"jump","pressed":true},
+  {"type":"wait","duration":0.5},
+  {"type":"assert_property","node_path":"Player","property":"position.y","operator":"<","expected":0},
+  {"type":"assert_exists","node_path":"Player/JumpParticles"},
+  {"type":"assert_text","text":"Score:"}
+]}'
+```
+
+Operators: `==`, `!=`, `>`, `>=`, `<`, `<=`, `contains`, `matches` (regex), `approx`. Nested property paths supported (`position.x`, `velocity.y`).
 
 ## AI Asset Generation
 

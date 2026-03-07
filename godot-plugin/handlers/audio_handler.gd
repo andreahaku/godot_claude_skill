@@ -206,13 +206,14 @@ func get_audio_info(params: Dictionary) -> Dictionary:
 		return {"error": "No scene open", "code": "NO_SCENE"}
 
 	var start = NodeFinder.find(_editor, node_path) if node_path != "" else root
+	var max_depth: int = params.get("max_depth", 64)
 	var players: Array = []
-	_find_audio_players(start, players)
+	_find_audio_players(start, players, 0, max_depth)
 
-	return {"players": players, "count": players.size()}
+	return {"players": players, "count": players.size(), "max_depth": max_depth}
 
 
-func _find_audio_players(node: Node, results: Array) -> void:
+func _find_audio_players(node: Node, results: Array, depth: int = 0, max_depth: int = 64) -> void:
 	if node is AudioStreamPlayer or node is AudioStreamPlayer2D or node is AudioStreamPlayer3D:
 		var info: Dictionary = {
 			"name": str(node.name),
@@ -224,5 +225,7 @@ func _find_audio_players(node: Node, results: Array) -> void:
 		if node.stream:
 			info["stream"] = node.stream.resource_path
 		results.append(info)
+	if depth >= max_depth:
+		return
 	for child in node.get_children():
-		_find_audio_players(child, results)
+		_find_audio_players(child, results, depth + 1, max_depth)

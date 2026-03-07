@@ -10,6 +10,7 @@ const WS_PORT := 9080
 var _ws: GodotClaudeWS
 var _router: CommandRouter
 var _undo: UndoHelper
+var _bridge_server: BridgeServer
 
 var _handlers: Array = []
 
@@ -25,8 +26,16 @@ func _enter_tree() -> void:
 	_undo = UndoHelper.new()
 	_undo.setup(get_undo_redo())
 
-	# Initialize router
-	_router = CommandRouter.new(_ws)
+	# Initialize bridge server for runtime game communication
+	_bridge_server = BridgeServer.new()
+	_bridge_server.name = "BridgeServer"
+	add_child(_bridge_server)
+	var bridge_err = _bridge_server.start()
+	if bridge_err != OK:
+		push_warning("[GodotClaude] Bridge server failed to start (runtime bridge will be unavailable)")
+
+	# Initialize router (with undo support for atomic batch mode)
+	_router = CommandRouter.new(_ws, _undo)
 
 	# Initialize all handlers and register commands
 	var ei = get_editor_interface()
@@ -38,7 +47,7 @@ func _enter_tree() -> void:
 		[ScriptHandler, [ei, _undo]],
 		[EditorHandler, [ei, self]],
 		[InputHandler, [ei]],
-		[RuntimeHandler, [ei]],
+		[RuntimeHandler, [ei, _bridge_server]],
 		[AnimationHandler, [ei, _undo]],
 		[AnimationTreeHandler, [ei, _undo]],
 		[TileMapHandler, [ei, _undo]],
@@ -51,7 +60,7 @@ func _enter_tree() -> void:
 		[ShaderHandler, [ei, _undo]],
 		[ResourceHandler, [ei]],
 		[BatchHandler, [ei, _undo]],
-		[TestingHandler, [ei]],
+		[TestingHandler, [ei, _bridge_server]],
 		[AnalysisHandler, [ei]],
 		[ProfilingHandler, [ei]],
 		[AssetHandler, [ei, _undo]],
@@ -62,13 +71,21 @@ func _enter_tree() -> void:
 		var handler = _create_handler(config[0], config[1])
 		if handler:
 			_handlers.append(handler)
-			_router.register_all(handler.get_commands(), handler)
+			var commands := handler.get_commands()
+			_router.register_all(commands, handler)
+			# Mark commands from undo-using handlers as undoable
+			if _undo in config[1]:
+				for cmd in commands:
+					_router.register_metadata(cmd, {"undoable": true, "safe_for_batch": true})
 
 	# Register meta commands
 	_router.register("list_commands", _list_commands)
 	_router.register("get_command_info", _get_command_info)
 	_router.register("get_version", _get_version)
 	_router.register("batch_execute", _router.batch_execute)
+
+	# Register command metadata (undoable, persistent, runtime_only, etc.)
+	_register_command_metadata()
 
 	# Connect WebSocket signal
 	_ws.command_received.connect(_on_command)
@@ -83,6 +100,10 @@ func _enter_tree() -> void:
 
 
 func _exit_tree() -> void:
+	if _bridge_server:
+		_bridge_server.stop()
+		remove_child(_bridge_server)
+		_bridge_server = null
 	if _ws:
 		_ws.stop()
 		remove_child(_ws)
@@ -93,6 +114,8 @@ func _exit_tree() -> void:
 func _process(delta: float) -> void:
 	if _ws:
 		_ws.poll()
+	if _bridge_server:
+		_bridge_server.poll()
 
 
 func _on_command(id: String, command: String, params: Dictionary) -> void:
@@ -129,7 +152,11 @@ func _get_command_info(params: Dictionary) -> Dictionary:
 		return {"error": "Unknown command: %s" % command, "code": "UNKNOWN_COMMAND", "suggestions": suggestions.slice(0, 5)}
 
 	var categories = _router.get_command_categories()
-	return {"command": command, "category": categories.get(command, "meta"), "exists": true}
+	var metadata = _router.get_command_metadata(command)
+	var info: Dictionary = {"command": command, "category": categories.get(command, "meta"), "exists": true}
+	if not metadata.is_empty():
+		info["metadata"] = metadata
+	return info
 
 
 func _get_version(params: Dictionary) -> Dictionary:
@@ -138,6 +165,65 @@ func _get_version(params: Dictionary) -> Dictionary:
 		"godot_version": "%s.%s.%s" % [Engine.get_version_info().major, Engine.get_version_info().minor, Engine.get_version_info().patch],
 		"commands": _router.get_command_list().size(),
 	}
+
+
+func _register_command_metadata() -> void:
+	# Runtime-only commands (require game to be running)
+	var runtime_commands: Array[String] = [
+		"get_game_scene_tree", "get_game_node_properties", "set_game_node_properties",
+		"execute_game_script", "capture_frames", "monitor_properties",
+		"find_ui_elements", "click_button_by_text", "wait_for_node",
+		"start_recording", "stop_recording", "replay_recording",
+		"run_test_scenario", "run_stress_test",
+	]
+	for cmd in runtime_commands:
+		var meta := _router.get_command_metadata(cmd)
+		meta["runtime_only"] = true
+		meta["safe_for_batch"] = true
+		_router.register_metadata(cmd, meta)
+
+	# Persistent commands that write to disk (not undoable via UndoRedo)
+	var persistent_commands: Array[String] = [
+		"create_script", "edit_script",
+		"create_scene", "save_scene", "delete_scene",
+		"cross_scene_set_property",
+	]
+	for cmd in persistent_commands:
+		var meta := _router.get_command_metadata(cmd)
+		meta["persistent"] = true
+		meta["undoable"] = false
+		meta["safe_for_batch"] = true
+		_router.register_metadata(cmd, meta)
+
+	# Export commands: persistent and destructive
+	var export_commands: Array[String] = [
+		"export_project",
+	]
+	for cmd in export_commands:
+		var meta := _router.get_command_metadata(cmd)
+		meta["persistent"] = true
+		meta["destructive"] = true
+		meta["undoable"] = false
+		meta["safe_for_batch"] = true
+		_router.register_metadata(cmd, meta)
+
+	# Meta/read-only commands: safe, not undoable (nothing to undo)
+	var readonly_commands: Array[String] = [
+		"list_commands", "get_command_info", "get_version", "batch_execute",
+		"list_scripts", "read_script", "get_open_scripts",
+		"get_scene_tree", "get_scene_file_content",
+		"get_node_properties",
+		"list_animations", "get_animation_info",
+		"find_nodes_by_type", "find_signal_connections",
+		"find_node_references", "get_scene_dependencies",
+		"list_export_presets", "get_export_info",
+		"get_bridge_status",
+	]
+	for cmd in readonly_commands:
+		var meta := _router.get_command_metadata(cmd)
+		if not meta.has("safe_for_batch"):
+			meta["safe_for_batch"] = true
+		_router.register_metadata(cmd, meta)
 
 
 func _create_handler(handler_class, args: Array):

@@ -27,14 +27,16 @@ func get_commands() -> Dictionary:
 func find_unused_resources(params: Dictionary) -> Dictionary:
 	var resource_types: Array = params.get("types", ["tres", "res", "png", "jpg", "wav", "ogg", "mp3"])
 
+	var max_depth: int = params.get("max_depth", 32)
+
 	# Collect all resources
 	var all_resources: Array = []
-	_collect_files("res://", resource_types, all_resources)
+	_collect_files("res://", resource_types, all_resources, 0, max_depth)
 
 	# Collect all references from scenes and scripts
 	var referenced: Dictionary = {}
 	var ref_files: Array = []
-	_collect_files("res://", ["tscn", "scn", "gd", "cs", "tres"], ref_files)
+	_collect_files("res://", ["tscn", "scn", "gd", "cs", "tres"], ref_files, 0, max_depth)
 
 	for f in ref_files:
 		var file = FileAccess.open(f, FileAccess.READ)
@@ -58,9 +60,10 @@ func analyze_signal_flow(params: Dictionary) -> Dictionary:
 	if root == null:
 		return {"error": "No scene open", "code": "NO_SCENE"}
 
+	var max_depth: int = params.get("max_depth", 64)
 	var flow: Array = []
-	_map_signals(root, flow, root)
-	return {"flow": flow, "count": flow.size()}
+	_map_signals(root, flow, root, 0, max_depth)
+	return {"flow": flow, "count": flow.size(), "max_depth": max_depth}
 
 
 func analyze_scene_complexity(params: Dictionary) -> Dictionary:
@@ -80,8 +83,9 @@ func analyze_scene_complexity(params: Dictionary) -> Dictionary:
 	if root == null:
 		return {"error": "No scene available", "code": "NO_SCENE"}
 
+	var max_depth: int = params.get("max_depth", 64)
 	var stats: Dictionary = {"node_count": 0, "max_depth": 0, "types": {}}
-	_analyze_node(root, 0, stats)
+	_analyze_node(root, 0, stats, max_depth)
 
 	if path != "" and root:
 		root.queue_free()
@@ -94,16 +98,18 @@ func find_script_references(params: Dictionary) -> Dictionary:
 	if script_path == "":
 		return {"error": "path is required", "code": "MISSING_PARAM"}
 
+	var max_depth: int = params.get("max_depth", 32)
 	var results: Array = []
-	_search_references("res://", script_path, results)
-	return {"path": script_path, "references": results, "count": results.size()}
+	_search_references("res://", script_path, results, 0, max_depth)
+	return {"path": script_path, "references": results, "count": results.size(), "max_depth": max_depth}
 
 
 func detect_circular_dependencies(params: Dictionary) -> Dictionary:
 	# Build dependency graph
+	var max_depth: int = params.get("max_depth", 32)
 	var graph: Dictionary = {} # path -> [dependencies]
 	var all_scripts: Array = []
-	_collect_files("res://", ["gd"], all_scripts)
+	_collect_files("res://", ["gd"], all_scripts, 0, max_depth)
 
 	for script_path in all_scripts:
 		var deps: Array = []
@@ -144,7 +150,8 @@ func get_project_statistics(params: Dictionary) -> Dictionary:
 		"script_count": 0,
 	}
 
-	_gather_stats("res://", stats)
+	var max_depth: int = params.get("max_depth", 32)
+	_gather_stats("res://", stats, 0, max_depth)
 
 	stats["scene_count"] = stats.files.scenes
 	stats["script_count"] = stats.files.scripts
@@ -152,7 +159,9 @@ func get_project_statistics(params: Dictionary) -> Dictionary:
 	return stats
 
 
-func _collect_files(path: String, extensions: Array, results: Array) -> void:
+func _collect_files(path: String, extensions: Array, results: Array, depth: int = 0, max_depth: int = 32) -> void:
+	if depth >= max_depth:
+		return
 	var dir = DirAccess.open(path)
 	if dir == null:
 		return
@@ -164,7 +173,7 @@ func _collect_files(path: String, extensions: Array, results: Array) -> void:
 			continue
 		var full_path = path.path_join(file_name)
 		if dir.current_is_dir():
-			_collect_files(full_path, extensions, results)
+			_collect_files(full_path, extensions, results, depth + 1, max_depth)
 		else:
 			var ext = file_name.get_extension().to_lower()
 			if ext in extensions:
@@ -173,7 +182,7 @@ func _collect_files(path: String, extensions: Array, results: Array) -> void:
 	dir.list_dir_end()
 
 
-func _map_signals(node: Node, flow: Array, scene_root: Node) -> void:
+func _map_signals(node: Node, flow: Array, scene_root: Node, depth: int = 0, max_depth: int = 64) -> void:
 	for sig in node.get_signal_list():
 		for conn in node.get_signal_connection_list(sig.name):
 			flow.append({
@@ -182,21 +191,29 @@ func _map_signals(node: Node, flow: Array, scene_root: Node) -> void:
 				"target": str(scene_root.get_path_to(conn.callable.get_object())) if conn.callable.get_object() is Node else "?",
 				"method": conn.callable.get_method(),
 			})
+	if depth >= max_depth:
+		return
 	for child in node.get_children():
-		_map_signals(child, flow, scene_root)
+		_map_signals(child, flow, scene_root, depth + 1, max_depth)
 
 
-func _analyze_node(node: Node, depth: int, stats: Dictionary) -> void:
+func _analyze_node(node: Node, depth: int, stats: Dictionary, max_depth: int = 64) -> void:
 	stats.node_count += 1
 	if depth > stats.max_depth:
 		stats.max_depth = depth
 	var type = node.get_class()
 	stats.types[type] = stats.types.get(type, 0) + 1
+	if depth >= max_depth:
+		if node.get_child_count() > 0:
+			stats["truncated_at_depth"] = max_depth
+		return
 	for child in node.get_children():
-		_analyze_node(child, depth + 1, stats)
+		_analyze_node(child, depth + 1, stats, max_depth)
 
 
-func _search_references(path: String, target: String, results: Array) -> void:
+func _search_references(path: String, target: String, results: Array, depth: int = 0, max_depth: int = 32) -> void:
+	if depth >= max_depth:
+		return
 	var dir = DirAccess.open(path)
 	if dir == null:
 		return
@@ -208,7 +225,7 @@ func _search_references(path: String, target: String, results: Array) -> void:
 			continue
 		var full_path = path.path_join(file_name)
 		if dir.current_is_dir():
-			_search_references(full_path, target, results)
+			_search_references(full_path, target, results, depth + 1, max_depth)
 		else:
 			var ext = file_name.get_extension().to_lower()
 			if ext in ["gd", "tscn", "tres", "cs"]:
@@ -239,7 +256,9 @@ func _dfs_detect_cycle(node: String, graph: Dictionary, visited: Dictionary, rec
 	rec_stack.erase(node)
 
 
-func _gather_stats(path: String, stats: Dictionary) -> void:
+func _gather_stats(path: String, stats: Dictionary, depth: int = 0, max_depth: int = 32) -> void:
+	if depth >= max_depth:
+		return
 	var dir = DirAccess.open(path)
 	if dir == null:
 		return
@@ -251,7 +270,7 @@ func _gather_stats(path: String, stats: Dictionary) -> void:
 			continue
 		var full_path = path.path_join(file_name)
 		if dir.current_is_dir():
-			_gather_stats(full_path, stats)
+			_gather_stats(full_path, stats, depth + 1, max_depth)
 		else:
 			stats.total_files += 1
 			var ext = file_name.get_extension().to_lower()
