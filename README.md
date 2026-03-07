@@ -353,7 +353,7 @@ bun ws_send.ts run_test_scenario '{"name":"Movement Test","steps":[
   {"type":"assert_property_range","node_path":"Player","property":"position.x","min":50,"max":500},
   {"type":"wait_for_property","node_path":"Player","property":"velocity.x","expected":0,"timeout":2.0},
   {"type":"assert_text","text":"Score:"},
-  {"type":"assert_node_count","type":"CharacterBody2D","expected":1},
+  {"type":"assert_node_count","node_type":"CharacterBody2D","expected":1},
   {"type":"wait_for_text","text":"Level Complete","timeout":10.0}
 ]}'
 ```

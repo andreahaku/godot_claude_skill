@@ -315,7 +315,7 @@ Uses the runtime bridge when connected for live game testing.
     - `assert_property_range` — Assert property is within range. Params: `node_path` (str), `property` (str), `min` (float), `max` (float). Works with nested properties like `position.x`.
     - `assert_exists` — Assert node exists. Params: `node_path` (str)
     - `assert_text` — Assert text visible in UI. Params: `text` (str), `exact` (bool)
-    - `assert_node_count` — Assert count of nodes by type or group. Params: `type` (str) or `group` (str), `expected` (int), `operator` (str, default "==")
+    - `assert_node_count` — Assert count of nodes by type or group. Params: `node_type` (str) or `group` (str), `expected` (int), `operator` (str, default "==")
     - `assert_signal_emitted` — Assert a signal was emitted. Params: `node_path` (str), `signal_name` (str)
     - `assert_scene` — Assert current scene path. Params: `scene_path` (str)
     - `capture_snapshot` — Capture screenshot during test. Params: `label` (str)

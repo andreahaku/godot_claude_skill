@@ -449,13 +449,13 @@ func _step_assert_property_range(step: Dictionary) -> Dictionary:
 
 
 func _step_assert_node_count(step: Dictionary) -> Dictionary:
-	var type_name: String = step.get("type", "")
+	var type_name: String = step.get("node_type", "")
 	var group_name: String = step.get("group", "")
 	var expected: int = step.get("expected", -1)
 	var operator: String = step.get("operator", "==")
 
 	if type_name == "" and group_name == "":
-		return {"status": "fail", "error": "type or group is required"}
+		return {"status": "fail", "error": "node_type or group is required"}
 
 	var count: int = 0
 	if _bridge.is_bridge_connected():
@@ -484,7 +484,7 @@ func _step_assert_node_count(step: Dictionary) -> Dictionary:
 				count = tree.get_nodes_in_group(group_name).size()
 
 	if expected < 0:
-		return {"status": "pass", "count": count, "type": type_name, "group": group_name}
+		return {"status": "pass", "count": count, "node_type": type_name, "group": group_name}
 
 	var eval_result := _evaluate_assertion(count, expected, operator)
 	return {
@@ -492,7 +492,7 @@ func _step_assert_node_count(step: Dictionary) -> Dictionary:
 		"count": count,
 		"expected": expected,
 		"operator": operator,
-		"type": type_name,
+		"node_type": type_name,
 		"group": group_name,
 	}
 

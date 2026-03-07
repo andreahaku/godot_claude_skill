@@ -157,7 +157,7 @@ func set_game_node_properties(params: Dictionary) -> Dictionary:
 	var check := _require_bridge()
 	if check.has("error"):
 		if _editor.is_playing_scene() and not _bridge.is_bridge_connected():
-			return _fallback_set_game_node_properties(params)
+			return await _fallback_set_game_node_properties(params)
 		return check
 
 	var node_path: String = params.get("node_path", "")
