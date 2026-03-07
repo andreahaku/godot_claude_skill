@@ -446,7 +446,7 @@ bun ws_send.ts lookup_class '{"class_name":"Button","include_inherited":true}'
 
 ## AI Asset Generation
 
-The skill includes an AI-powered asset generator that creates sprites, textures, tilesets, and other game art using image generation APIs.
+The skill includes an AI-powered asset generator that uses **structured JSON prompting** internally for dramatically improved image quality. Each aspect (subject, composition, style, technical constraints) is isolated during prompt construction to prevent concept bleeding — adjectives stay tied to their target elements instead of leaking across the image.
 
 ### Setup
 
@@ -498,6 +498,37 @@ bun skill/generate_asset.ts "game icon sword" \
 | `bg_threshold` | `number` | Brightness threshold for background removal (0-255, default 240) |
 | `trim` | `boolean` | Trim transparent whitespace around the image |
 | `resize` | `string` | Resize to `WxH` (e.g., `"32x32"`, `"64x64"`) |
+| `quality` | `string` | `"draft"`, `"standard"` (default), or `"final"` (premium quality modifiers) |
+| `style_notes` | `string` | Additional style guidance (e.g., `"desaturated forest tones"`) |
+| `style_reference` | `string` | Path to reference image for style consistency |
+| `color_palette` | `string[]` | Hex colors to constrain palette (e.g., `["#2d5a27", "#8b4513"]`) |
+| `no_manifest` | `boolean` | Skip creating `.asset.json` manifest (default: false) |
+
+### Asset Manifests
+
+Every generated image automatically gets a sidecar `.asset.json` manifest with the full prompt, style, provider, structured prompt data, and post-processing details. This enables:
+- Regenerating variations with the same parameters
+- Tracking how assets were produced
+- Batch-updating assets later
+
+```bash
+# knight.png → knight.asset.json
+# Contents: {prompt, style, provider, model, timestamp, structured_prompt, options, post_processing}
+```
+
+### Style Consistency
+
+Use `style_reference` and `color_palette` to maintain consistent art across assets:
+
+```bash
+# Generate first asset
+bun skill/generate_asset.ts "knight character" \
+  '{"output":"res://sprites/knight.png","style":"pixel_art_character","project":"."}'
+
+# Generate matching enemy with same palette
+bun skill/generate_asset.ts "skeleton enemy" \
+  '{"output":"res://sprites/skeleton.png","style":"pixel_art_character","project":".","style_reference":"res://sprites/knight.png","color_palette":["#8b4513","#d2691e","#f5deb3"]}'
+```
 
 ### Full Workflow Example
 
