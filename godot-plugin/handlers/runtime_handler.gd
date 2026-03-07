@@ -64,6 +64,10 @@ func _get_scene_tree() -> SceneTree:
 	return Engine.get_main_loop() as SceneTree
 
 
+func _is_bridge_available() -> bool:
+	return _bridge != null and _editor.is_playing_scene() and _bridge.is_bridge_connected()
+
+
 func _require_playing() -> Dictionary:
 	if not _editor.is_playing_scene():
 		return {"error": "No game is currently running. Use play_scene first.", "code": "NOT_PLAYING"}
@@ -275,20 +279,31 @@ func wait_for_node(params: Dictionary) -> Dictionary:
 # ---------------------------------------------------------------------------
 
 func start_recording(params: Dictionary) -> Dictionary:
-	var max_events: int = params.get("max_events", MAX_RECORDING_EVENTS)
-	var max_duration: float = params.get("max_duration", MAX_RECORDING_DURATION)
+	# Route through bridge for game-side recording when available
+	if _is_bridge_available():
+		var result: Dictionary = await _bridge.send_command_await("bridge_start_recording", params)
+		return result
+
+	# Editor-side fallback (limited — no real event capture)
 	_is_recording = true
 	_recording_events.clear()
 	_recording_start_time = Time.get_ticks_msec()
-	_recording_max_events = max_events
-	_recording_max_duration = max_duration
-	return {"recording": true, "start_time": _recording_start_time, "max_events": max_events, "max_duration": max_duration}
+	_recording_max_events = params.get("max_events", MAX_RECORDING_EVENTS)
+	_recording_max_duration = params.get("max_duration", MAX_RECORDING_DURATION)
+	return {"recording": true, "max_events": _recording_max_events, "max_duration": _recording_max_duration,
+		"warning": "Recording on editor side — no real input events will be captured. Use with runtime bridge for actual recording."}
 
 
 func stop_recording(params: Dictionary) -> Dictionary:
+	# Route through bridge when available
+	if _is_bridge_available():
+		var result: Dictionary = await _bridge.send_command_await("bridge_stop_recording", params)
+		return result
+
+	# Editor-side fallback
 	_is_recording = false
 	var duration = (Time.get_ticks_msec() - _recording_start_time) / 1000.0
-	return {"recording": false, "events": _recording_events.size(), "duration": duration, "events_data": _recording_events, "max_events": _recording_max_events, "max_duration": _recording_max_duration}
+	return {"recording": false, "events": _recording_events.size(), "duration": duration, "events_data": _recording_events}
 
 
 func replay_recording(params: Dictionary) -> Dictionary:
@@ -296,54 +311,13 @@ func replay_recording(params: Dictionary) -> Dictionary:
 	if check.has("error"):
 		return check
 
-	var events: Array = params.get("events", _recording_events)
-	var speed: float = params.get("speed", 1.0)
+	# Route through bridge for game-side replay
+	if _is_bridge_available():
+		var result: Dictionary = await _bridge.send_command_await("bridge_replay_recording", params)
+		return result
 
-	if events.is_empty():
-		return {"error": "No events to replay", "code": "NO_EVENTS"}
-
-	var replayed: int = 0
-	for event_data in events:
-		var delay: float = event_data.get("time", 0.0) / speed
-		if delay > 0:
-			await Engine.get_main_loop().create_timer(delay).timeout
-
-		var event_type: String = event_data.get("type", "")
-		match event_type:
-			"key":
-				var ev = InputEventKey.new()
-				ev.keycode = event_data.get("keycode", KEY_NONE)
-				ev.pressed = event_data.get("pressed", true)
-				Input.parse_input_event(ev)
-			"mouse_button":
-				var ev = InputEventMouseButton.new()
-				ev.position = Vector2(event_data.get("x", 0), event_data.get("y", 0))
-				ev.button_index = event_data.get("button", 1)
-				ev.pressed = event_data.get("pressed", true)
-				Input.parse_input_event(ev)
-			"mouse_motion":
-				var ev = InputEventMouseMotion.new()
-				ev.position = Vector2(event_data.get("x", 0), event_data.get("y", 0))
-				ev.relative = Vector2(event_data.get("rel_x", 0), event_data.get("rel_y", 0))
-				Input.parse_input_event(ev)
-		replayed += 1
-
-	return {"replayed": replayed}
-
-
-func _check_recording_bounds() -> void:
-	if not _is_recording:
-		return
-
-	var elapsed = (Time.get_ticks_msec() - _recording_start_time) / 1000.0
-	if elapsed >= _recording_max_duration:
-		_is_recording = false
-		push_warning("[GodotClaude] Recording auto-stopped: max duration reached (%.0fs)" % _recording_max_duration)
-		return
-
-	if _recording_events.size() >= _recording_max_events:
-		_is_recording = false
-		push_warning("[GodotClaude] Recording auto-stopped: max events reached (%d)" % _recording_max_events)
+	return {"error": "Replay requires the runtime bridge to be connected", "code": "BRIDGE_NOT_CONNECTED",
+		"suggestions": ["Start the game first, then retry"]}
 
 
 # ---------------------------------------------------------------------------

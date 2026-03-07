@@ -161,11 +161,13 @@ bun /path/to/godot_claude_skill/skill/generate_audio.ts sfx '{"text":"explosion"
 - `get_scene_diff` — Git diff of scene/resource files. Params: `path` (str, optional)
 
 ### Input Simulation (5)
-- `simulate_key` — Keyboard. Params: `key` (str), `pressed` (bool), `shift` (bool), `ctrl` (bool), `alt` (bool), `meta` (bool)
+When the game is running and the runtime bridge is connected, input commands are routed to the game process for real input injection. Otherwise, falls back to editor-side `Input.parse_input_event()`. Response includes `target: "runtime"` or `target: "editor"` to indicate which path was used.
+
+- `simulate_key` — Keyboard. Params: `key` (str), `pressed` (bool), `duration` (float, optional — hold then release), `shift` (bool), `ctrl` (bool), `alt` (bool), `meta` (bool), `auto_release` (bool)
 - `simulate_mouse_click` — Click. Params: `x` (int), `y` (int), `button` (int, default 1), `double_click` (bool)
 - `simulate_mouse_move` — Move mouse. Params: `x` (int), `y` (int), `relative_x` (int), `relative_y` (int)
-- `simulate_action` — Input action. Params: `action` (str), `pressed` (bool), `strength` (float, default 1.0)
-- `simulate_sequence` — Multi-event combo. Params: `steps` (array of step objects — see Input Simulation below)
+- `simulate_action` — Input action. Params: `action` (str), `pressed` (bool), `strength` (float, default 1.0), `duration` (float, optional — press for N seconds then auto-release)
+- `simulate_sequence` — Multi-event combo. Params: `steps` (array of step objects — types: `action`, `key`, `mouse_click`, `mouse_move`, `wait`)
 
 ### Runtime Analysis (16)
 Commands in this category use the runtime bridge architecture: when a BridgeServer is connected (port 9081, injected into running game), commands are routed to the game process for accurate live data. When no bridge is connected, commands fall back to editor tree access.
@@ -183,9 +185,9 @@ Commands in this category use the runtime bridge architecture: when a BridgeServ
 - `wait_for_node` — Wait for node. Params: `node_path` (str), `timeout` (float, default 5.0) (runtime_only)
 - `batch_get_properties` — Bulk read. Params: `queries` (array of {node_path, properties}) (runtime_only)
 - `get_bridge_status` — Check bridge connection status and capabilities
-- `start_recording` — Start input recording. Params: `max_events` (int, default 10000), `max_duration` (float, default 300.0). **Experimental**: infrastructure exists but no actual event capture is implemented yet.
-- `stop_recording` — Stop recording and return captured data. **Experimental.**
-- `replay_recording` — Replay recorded input. Params: `events` (array — from stop_recording's events_data; defaults to last recording if omitted), `speed` (float, default 1.0). **Experimental.**
+- `start_recording` — Start input recording on the game side via bridge. Params: `max_events` (int, default 10000), `max_duration` (float, default 300.0). Captures key, mouse, joypad, and action events with timestamps. Requires runtime bridge.
+- `stop_recording` — Stop recording and return captured events. Returns `events_data` array for replay.
+- `replay_recording` — Replay recorded input in the running game. Params: `events` (array — from stop_recording's events_data; defaults to last recording if omitted), `speed` (float, default 1.0). Requires runtime bridge.
 
 ### Animation (6)
 - `list_animations` — List animations on AnimationPlayer. Params: `node_path` (str)

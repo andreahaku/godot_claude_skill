@@ -74,7 +74,7 @@ func _enter_tree() -> void:
 		[NodeHandler, [ei, _undo]],
 		[ScriptHandler, [ei, _undo]],
 		[EditorHandler, [ei, self]],
-		[InputHandler, [ei]],
+		[InputHandler, [ei, _bridge_server]],
 		[RuntimeHandlerScript, [ei, _bridge_server]],
 		[AnimationHandler, [ei, _undo]],
 		[AnimationTreeHandler, [ei, _undo]],
@@ -434,16 +434,14 @@ func _register_command_metadata() -> void:
 		"find_ui_elements", "click_button_by_text", "wait_for_node",
 		"run_test_scenario", "run_stress_test",
 	]
-	# Recording commands are experimental (no event capture pipeline yet)
-	var experimental_commands: Array[String] = [
+	# Recording commands — work through runtime bridge, editor fallback is limited
+	var recording_commands: Array[String] = [
 		"start_recording", "stop_recording", "replay_recording",
 	]
-	for cmd in experimental_commands:
+	for cmd in recording_commands:
 		var meta := _router.get_command_metadata(cmd)
 		meta["runtime_only"] = true
-		meta["experimental"] = true
 		meta["safe_for_batch"] = true
-		meta["note"] = "Recording event capture is not yet implemented. Recording appears available but captures no events in normal usage."
 		_router.register_metadata(cmd, meta)
 	for cmd in runtime_commands:
 		var meta := _router.get_command_metadata(cmd)

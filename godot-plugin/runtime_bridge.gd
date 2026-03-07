@@ -14,16 +14,51 @@ const BRIDGE_PORT := 9081
 const RECONNECT_INTERVAL := 2.0
 const MAX_DEPTH := 64
 const LOG_BUFFER_SIZE := 256
+const MAX_RECORDING_EVENTS := 10000
+const MAX_RECORDING_DURATION := 300.0  # 5 minutes
 
 var _ws: WebSocketPeer
 var _connected: bool = false
 var _reconnect_timer: float = 0.0
 var _handshake_sent: bool = false
 
+# Recording state
+var _is_recording: bool = false
+var _recorded_events: Array = []
+var _recording_start_time: float = 0.0
+var _max_recording_events: int = MAX_RECORDING_EVENTS
+var _max_recording_duration: float = MAX_RECORDING_DURATION
+
 
 func _ready() -> void:
 	print("[RuntimeBridge] Initializing game-side bridge...")
 	_connect_to_editor()
+
+
+func _input(event: InputEvent) -> void:
+	if not _is_recording:
+		return
+
+	var entry: Dictionary = {}
+
+	if event is InputEventKey:
+		entry = {"type": "key", "keycode": event.keycode, "pressed": event.pressed,
+			"shift": event.shift_pressed, "ctrl": event.ctrl_pressed,
+			"alt": event.alt_pressed, "meta": event.meta_pressed}
+	elif event is InputEventMouseButton:
+		entry = {"type": "mouse_button", "position": _value_to_json(event.position),
+			"button": event.button_index, "pressed": event.pressed, "double_click": event.double_click}
+	elif event is InputEventMouseMotion:
+		entry = {"type": "mouse_motion", "position": _value_to_json(event.position),
+			"relative": _value_to_json(event.relative)}
+	elif event is InputEventJoypadButton:
+		entry = {"type": "joypad_button", "button_index": event.button_index, "pressed": event.pressed}
+	elif event is InputEventJoypadMotion:
+		entry = {"type": "joypad_motion", "axis": event.axis, "axis_value": event.axis_value}
+	else:
+		return
+
+	_maybe_record(entry)
 
 
 func _connect_to_editor() -> void:
@@ -122,13 +157,22 @@ func _handle_message(data: String) -> void:
 		_send_error(id, "Missing 'command' field", "MISSING_COMMAND")
 		return
 
-	# Route command — some commands are async (e.g. capture_screenshot)
-	if command == "bridge_capture_screenshot":
-		var result: Dictionary = await _capture_screenshot(params)
-		_send_response(id, result)
-	else:
-		var result: Dictionary = _handle_command(command, params)
-		_send_response(id, result)
+	# Route command — async commands need await, sync go through _handle_command
+	var result: Dictionary
+	match command:
+		"bridge_capture_screenshot":
+			result = await _capture_screenshot(params)
+		"bridge_simulate_action":
+			result = await _bridge_simulate_action(params)
+		"bridge_simulate_key":
+			result = await _bridge_simulate_key(params)
+		"bridge_simulate_sequence":
+			result = await _bridge_simulate_sequence(params)
+		"bridge_replay_recording":
+			result = await _bridge_replay_recording(params)
+		_:
+			result = _handle_command(command, params)
+	_send_response(id, result)
 
 
 func _handle_command(command: String, params: Dictionary) -> Dictionary:
@@ -151,6 +195,14 @@ func _handle_command(command: String, params: Dictionary) -> Dictionary:
 			return _execute_script(params)
 		"bridge_get_output_log":
 			return _get_output_log(params)
+		"bridge_simulate_mouse_click":
+			return _bridge_simulate_mouse_click(params)
+		"bridge_simulate_mouse_move":
+			return _bridge_simulate_mouse_move(params)
+		"bridge_start_recording":
+			return _bridge_start_recording(params)
+		"bridge_stop_recording":
+			return _bridge_stop_recording(params)
 		_:
 			return {"error": "Unknown bridge command: %s" % command, "code": "UNKNOWN_COMMAND"}
 
@@ -404,6 +456,258 @@ func _get_output_log(params: Dictionary) -> Dictionary:
 		"note": "Direct log capture is not available in the game process. Print output goes to the editor's Output panel. Use the editor-side get_editor_errors command instead.",
 		"limitation": true,
 	}
+
+
+# ---------------------------------------------------------------------------
+# Input simulation commands (game-side)
+# ---------------------------------------------------------------------------
+
+func _bridge_simulate_action(params: Dictionary) -> Dictionary:
+	var action: String = params.get("action", "")
+	if action == "":
+		return {"error": "action is required", "code": "MISSING_PARAM"}
+	if not InputMap.has_action(action):
+		var available: Array = []
+		for a in InputMap.get_actions():
+			available.append(str(a))
+		return {"error": "Action not found: %s" % action, "code": "ACTION_NOT_FOUND",
+			"suggestions": ["Available actions: %s" % str(available)]}
+	var pressed: bool = params.get("pressed", true)
+	var strength: float = params.get("strength", 1.0)
+	var duration: float = params.get("duration", 0.0)
+
+	if duration > 0.0 and pressed:
+		_action_press_and_record(action, strength)
+		await get_tree().create_timer(duration).timeout
+		_action_release_and_record(action)
+		return {"injected": "action", "action": action, "pressed": true, "released": true, "duration": duration, "target": "runtime"}
+	elif pressed:
+		_action_press_and_record(action, strength)
+		return {"injected": "action", "action": action, "pressed": true, "target": "runtime"}
+	else:
+		_action_release_and_record(action)
+		return {"injected": "action", "action": action, "pressed": false, "target": "runtime"}
+
+
+func _bridge_simulate_key(params: Dictionary) -> Dictionary:
+	var key_str: String = params.get("key", "")
+	if key_str == "":
+		return {"error": "key is required", "code": "MISSING_PARAM"}
+	var keycode = _string_to_keycode(key_str)
+	if keycode == KEY_NONE:
+		return {"error": "Unknown key: %s" % key_str, "code": "INVALID_KEY"}
+	var pressed: bool = params.get("pressed", true)
+	var duration: float = params.get("duration", 0.0)
+
+	var ev := InputEventKey.new()
+	ev.keycode = keycode
+	ev.pressed = pressed
+	ev.shift_pressed = params.get("shift", false)
+	ev.ctrl_pressed = params.get("ctrl", false)
+	ev.alt_pressed = params.get("alt", false)
+	ev.meta_pressed = params.get("meta", false)
+
+	if duration > 0.0 and pressed:
+		Input.parse_input_event(ev)
+		await get_tree().create_timer(duration).timeout
+		var release := InputEventKey.new()
+		release.keycode = keycode
+		release.pressed = false
+		Input.parse_input_event(release)
+		return {"injected": "key", "key": key_str, "pressed": true, "released": true, "duration": duration, "target": "runtime"}
+	else:
+		Input.parse_input_event(ev)
+		return {"injected": "key", "key": key_str, "pressed": pressed, "target": "runtime"}
+
+
+func _bridge_simulate_mouse_click(params: Dictionary) -> Dictionary:
+	var x: float = params.get("x", 0.0)
+	var y: float = params.get("y", 0.0)
+	var button: int = params.get("button", MOUSE_BUTTON_LEFT)
+	var double_click: bool = params.get("double_click", false)
+
+	var ev := InputEventMouseButton.new()
+	ev.position = Vector2(x, y)
+	ev.global_position = Vector2(x, y)
+	ev.button_index = button
+	ev.pressed = true
+	ev.double_click = double_click
+	Input.parse_input_event(ev)
+
+	var release := InputEventMouseButton.new()
+	release.position = Vector2(x, y)
+	release.global_position = Vector2(x, y)
+	release.button_index = button
+	release.pressed = false
+	Input.parse_input_event(release)
+
+	return {"injected": "mouse_click", "x": x, "y": y, "button": button, "target": "runtime"}
+
+
+func _bridge_simulate_mouse_move(params: Dictionary) -> Dictionary:
+	var x: float = params.get("x", 0.0)
+	var y: float = params.get("y", 0.0)
+	var relative_x: float = params.get("relative_x", 0.0)
+	var relative_y: float = params.get("relative_y", 0.0)
+
+	var ev := InputEventMouseMotion.new()
+	ev.position = Vector2(x, y)
+	ev.global_position = Vector2(x, y)
+	ev.relative = Vector2(relative_x, relative_y)
+	Input.parse_input_event(ev)
+
+	return {"injected": "mouse_move", "x": x, "y": y, "target": "runtime"}
+
+
+func _bridge_simulate_sequence(params: Dictionary) -> Dictionary:
+	var steps: Array = params.get("steps", [])
+	if steps.is_empty():
+		return {"error": "steps array is required", "code": "MISSING_PARAM"}
+
+	var results: Array = []
+	for step in steps:
+		var step_type: String = step.get("type", "")
+		var result: Dictionary
+		match step_type:
+			"action":
+				result = await _bridge_simulate_action(step)
+			"key":
+				result = await _bridge_simulate_key(step)
+			"mouse_click":
+				result = _bridge_simulate_mouse_click(step)
+			"mouse_move":
+				result = _bridge_simulate_mouse_move(step)
+			"wait":
+				var duration: float = step.get("duration", 0.1)
+				await get_tree().create_timer(duration).timeout
+				result = {"waited": duration}
+			_:
+				result = {"error": "Unknown step type: %s" % step_type}
+		results.append(result)
+
+	return {"steps_executed": results.size(), "results": results, "target": "runtime"}
+
+
+# ---------------------------------------------------------------------------
+# Helpers: action injection + recording integration
+# ---------------------------------------------------------------------------
+
+## Press action and record it if recording is active.
+func _action_press_and_record(action: String, strength: float = 1.0) -> void:
+	Input.action_press(action, strength)
+	_maybe_record({"type": "action", "action": action, "pressed": true, "strength": strength})
+
+
+## Release action and record it if recording is active.
+func _action_release_and_record(action: String) -> void:
+	Input.action_release(action)
+	_maybe_record({"type": "action", "action": action, "pressed": false})
+
+
+## Append a recording entry if recording is active and within bounds.
+func _maybe_record(entry: Dictionary) -> void:
+	if not _is_recording:
+		return
+	if _recorded_events.size() >= _max_recording_events:
+		_is_recording = false
+		return
+	var elapsed := (Time.get_ticks_msec() - _recording_start_time) / 1000.0
+	if elapsed > _max_recording_duration:
+		_is_recording = false
+		return
+	entry["time"] = elapsed
+	_recorded_events.append(entry)
+
+
+# ---------------------------------------------------------------------------
+# Recording commands (game-side)
+# ---------------------------------------------------------------------------
+
+func _bridge_start_recording(params: Dictionary) -> Dictionary:
+	_max_recording_events = params.get("max_events", MAX_RECORDING_EVENTS)
+	_max_recording_duration = params.get("max_duration", MAX_RECORDING_DURATION)
+	_recorded_events.clear()
+	_recording_start_time = Time.get_ticks_msec()
+	_is_recording = true
+	return {"recording": true, "max_events": _max_recording_events, "max_duration": _max_recording_duration}
+
+
+func _bridge_stop_recording(_params: Dictionary) -> Dictionary:
+	_is_recording = false
+	var duration := (Time.get_ticks_msec() - _recording_start_time) / 1000.0
+	return {
+		"recording": false,
+		"events": _recorded_events.size(),
+		"duration": duration,
+		"events_data": _recorded_events.duplicate(),
+	}
+
+
+func _bridge_replay_recording(params: Dictionary) -> Dictionary:
+	var events: Array = params.get("events", _recorded_events)
+	var speed: float = params.get("speed", 1.0)
+
+	if events.is_empty():
+		return {"error": "No events to replay", "code": "NO_EVENTS"}
+
+	var replayed: int = 0
+	var prev_time: float = 0.0
+
+	for event in events:
+		var event_time: float = event.get("time", 0.0)
+		var delay := (event_time - prev_time) / speed
+		if delay > 0.01:
+			await get_tree().create_timer(delay).timeout
+		prev_time = event_time
+
+		var etype: String = event.get("type", "")
+		match etype:
+			"action":
+				if event.get("pressed", true):
+					Input.action_press(event.get("action", ""), event.get("strength", 1.0))
+				else:
+					Input.action_release(event.get("action", ""))
+			"key":
+				var ev := InputEventKey.new()
+				ev.keycode = event.get("keycode", KEY_NONE)
+				ev.pressed = event.get("pressed", true)
+				ev.shift_pressed = event.get("shift", false)
+				ev.ctrl_pressed = event.get("ctrl", false)
+				ev.alt_pressed = event.get("alt", false)
+				ev.meta_pressed = event.get("meta", false)
+				Input.parse_input_event(ev)
+			"mouse_button":
+				var ev := InputEventMouseButton.new()
+				var pos = _parse_value(event.get("position", "Vector2(0, 0)"))
+				if pos is Vector2:
+					ev.position = pos
+				ev.button_index = event.get("button", MOUSE_BUTTON_LEFT)
+				ev.pressed = event.get("pressed", true)
+				ev.double_click = event.get("double_click", false)
+				Input.parse_input_event(ev)
+			"mouse_motion":
+				var ev := InputEventMouseMotion.new()
+				var pos = _parse_value(event.get("position", "Vector2(0, 0)"))
+				if pos is Vector2:
+					ev.position = pos
+				var rel = _parse_value(event.get("relative", "Vector2(0, 0)"))
+				if rel is Vector2:
+					ev.relative = rel
+				Input.parse_input_event(ev)
+			"joypad_button":
+				var ev := InputEventJoypadButton.new()
+				ev.button_index = event.get("button_index", 0)
+				ev.pressed = event.get("pressed", true)
+				Input.parse_input_event(ev)
+			"joypad_motion":
+				var ev := InputEventJoypadMotion.new()
+				ev.axis = event.get("axis", 0)
+				ev.axis_value = event.get("axis_value", 0.0)
+				Input.parse_input_event(ev)
+
+		replayed += 1
+
+	return {"replayed": replayed, "total_events": events.size(), "speed": speed, "target": "runtime"}
 
 
 # ---------------------------------------------------------------------------

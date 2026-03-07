@@ -5,12 +5,22 @@ extends RefCounted
 ## Input Simulation tools (5):
 ## simulate_key, simulate_mouse_click, simulate_mouse_move,
 ## simulate_action, simulate_sequence
+##
+## When the game is running and the runtime bridge is connected,
+## input commands are routed through the bridge for real game-side
+## injection. Otherwise, falls back to editor-side Input.parse_input_event().
 
 var _editor: EditorInterface
+var _bridge  # BridgeServer — duck-typed to avoid class_name dependency
 
 
-func _init(editor: EditorInterface):
+func _init(editor: EditorInterface, bridge = null):
 	_editor = editor
+	_bridge = bridge
+
+
+func _is_runtime_available() -> bool:
+	return _bridge != null and _editor.is_playing_scene() and _bridge.is_bridge_connected()
 
 
 func get_commands() -> Dictionary:
@@ -25,14 +35,20 @@ func get_commands() -> Dictionary:
 
 func simulate_key(params: Dictionary) -> Dictionary:
 	var key: String = params.get("key", "")
+	if key == "":
+		return {"error": "key parameter is required", "code": "MISSING_PARAM"}
+
+	# Route through runtime bridge when game is running
+	if _is_runtime_available():
+		var result: Dictionary = await _bridge.send_command_await("bridge_simulate_key", params)
+		return result
+
+	# Editor-side fallback
 	var pressed: bool = params.get("pressed", true)
 	var shift: bool = params.get("shift", false)
 	var ctrl: bool = params.get("ctrl", false)
 	var alt: bool = params.get("alt", false)
 	var meta: bool = params.get("meta", false)
-
-	if key == "":
-		return {"error": "key parameter is required", "code": "MISSING_PARAM"}
 
 	var keycode = _string_to_keycode(key)
 	if keycode == KEY_NONE:
@@ -48,6 +64,15 @@ func simulate_key(params: Dictionary) -> Dictionary:
 
 	Input.parse_input_event(event)
 
+	var duration: float = params.get("duration", 0.0)
+	if duration > 0.0 and pressed:
+		await Engine.get_main_loop().create_timer(duration).timeout
+		var release = InputEventKey.new()
+		release.keycode = keycode
+		release.pressed = false
+		Input.parse_input_event(release)
+		return {"key": key, "pressed": true, "released": true, "duration": duration, "keycode": keycode, "target": "editor"}
+
 	# If press+release is desired, send release immediately after
 	if pressed and params.get("auto_release", false):
 		var release = InputEventKey.new()
@@ -59,10 +84,16 @@ func simulate_key(params: Dictionary) -> Dictionary:
 		release.meta_pressed = meta
 		Input.parse_input_event(release)
 
-	return {"key": key, "pressed": pressed, "keycode": keycode}
+	return {"key": key, "pressed": pressed, "keycode": keycode, "target": "editor"}
 
 
 func simulate_mouse_click(params: Dictionary) -> Dictionary:
+	# Route through runtime bridge when game is running
+	if _is_runtime_available():
+		var result: Dictionary = await _bridge.send_command_await("bridge_simulate_mouse_click", params)
+		return result
+
+	# Editor-side fallback
 	var x: float = params.get("x", 0.0)
 	var y: float = params.get("y", 0.0)
 	var button: int = params.get("button", MOUSE_BUTTON_LEFT)
@@ -85,10 +116,16 @@ func simulate_mouse_click(params: Dictionary) -> Dictionary:
 	release.pressed = false
 	Input.parse_input_event(release)
 
-	return {"x": x, "y": y, "button": button, "double_click": double_click}
+	return {"x": x, "y": y, "button": button, "double_click": double_click, "target": "editor"}
 
 
 func simulate_mouse_move(params: Dictionary) -> Dictionary:
+	# Route through runtime bridge when game is running
+	if _is_runtime_available():
+		var result: Dictionary = await _bridge.send_command_await("bridge_simulate_mouse_move", params)
+		return result
+
+	# Editor-side fallback
 	var x: float = params.get("x", 0.0)
 	var y: float = params.get("y", 0.0)
 	var relative_x: float = params.get("relative_x", 0.0)
@@ -101,16 +138,23 @@ func simulate_mouse_move(params: Dictionary) -> Dictionary:
 
 	Input.parse_input_event(event)
 
-	return {"x": x, "y": y, "relative": TypeParser.value_to_json(event.relative)}
+	return {"x": x, "y": y, "relative": TypeParser.value_to_json(event.relative), "target": "editor"}
 
 
 func simulate_action(params: Dictionary) -> Dictionary:
 	var action_name: String = params.get("action", "")
-	var pressed: bool = params.get("pressed", true)
-	var strength: float = params.get("strength", 1.0)
-
 	if action_name == "":
 		return {"error": "action parameter is required", "code": "MISSING_PARAM"}
+
+	# Route through runtime bridge when game is running
+	if _is_runtime_available():
+		var result: Dictionary = await _bridge.send_command_await("bridge_simulate_action", params)
+		return result
+
+	# Editor-side fallback
+	var pressed: bool = params.get("pressed", true)
+	var strength: float = params.get("strength", 1.0)
+	var duration: float = params.get("duration", 0.0)
 
 	if not InputMap.has_action(action_name):
 		return {"error": "Action not found: %s" % action_name, "code": "ACTION_NOT_FOUND",
@@ -120,10 +164,17 @@ func simulate_action(params: Dictionary) -> Dictionary:
 	event.action = action_name
 	event.pressed = pressed
 	event.strength = strength
-
 	Input.parse_input_event(event)
 
-	return {"action": action_name, "pressed": pressed, "strength": strength}
+	if duration > 0.0 and pressed:
+		await Engine.get_main_loop().create_timer(duration).timeout
+		var release = InputEventAction.new()
+		release.action = action_name
+		release.pressed = false
+		Input.parse_input_event(release)
+		return {"action": action_name, "pressed": true, "released": true, "duration": duration, "target": "editor"}
+
+	return {"action": action_name, "pressed": pressed, "strength": strength, "target": "editor"}
 
 
 func simulate_sequence(params: Dictionary) -> Dictionary:
@@ -131,6 +182,12 @@ func simulate_sequence(params: Dictionary) -> Dictionary:
 	if steps.is_empty():
 		return {"error": "steps array is required", "code": "MISSING_PARAM"}
 
+	# Route entire sequence through bridge when game is running
+	if _is_runtime_available():
+		var result: Dictionary = await _bridge.send_command_await("bridge_simulate_sequence", params)
+		return result
+
+	# Editor-side fallback
 	var results: Array = []
 	for step in steps:
 		var step_type: String = step.get("type", "")
@@ -138,13 +195,13 @@ func simulate_sequence(params: Dictionary) -> Dictionary:
 		var result: Dictionary
 		match step_type:
 			"key":
-				result = simulate_key(step)
+				result = await simulate_key(step)
 			"mouse_click":
-				result = simulate_mouse_click(step)
+				result = await simulate_mouse_click(step)
 			"mouse_move":
-				result = simulate_mouse_move(step)
+				result = await simulate_mouse_move(step)
 			"action":
-				result = simulate_action(step)
+				result = await simulate_action(step)
 			"wait":
 				var duration: float = step.get("duration", 0.1)
 				await Engine.get_main_loop().create_timer(duration).timeout
@@ -154,7 +211,7 @@ func simulate_sequence(params: Dictionary) -> Dictionary:
 
 		results.append(result)
 
-	return {"steps_executed": results.size(), "results": results}
+	return {"steps_executed": results.size(), "results": results, "target": "editor"}
 
 
 func _string_to_keycode(key_str: String) -> int:
@@ -186,6 +243,5 @@ func _string_to_keycode(key_str: String) -> int:
 func _get_action_list() -> Array:
 	var actions: Array = []
 	for action in InputMap.get_actions():
-		if not str(action).begins_with("ui_"):
-			actions.append(str(action))
+		actions.append(str(action))
 	return actions
