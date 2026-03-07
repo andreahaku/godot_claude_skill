@@ -101,6 +101,7 @@ func get_bridge_status(params: Dictionary) -> Dictionary:
 		"game_running": _editor.is_playing_scene(),
 		"bridge_connected": _bridge.is_bridge_connected(),
 		"bridge_info": _bridge.get_bridge_info(),
+		"bridge_status": _bridge.get_status() if _bridge.has_method("get_status") else {},
 	}
 
 	# Include trace log when requested

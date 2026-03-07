@@ -382,16 +382,19 @@ func _get_version(params: Dictionary) -> Dictionary:
 func _health_check(params: Dictionary) -> Dictionary:
 	var ei = get_editor_interface()
 	var scene_root = ei.get_edited_scene_root()
+	var ws_status: Dictionary = _ws.get_status() if _ws and _ws.has_method("get_status") else {}
+	var bridge_status: Dictionary = _bridge_server.get_status() if _bridge_server and _bridge_server.has_method("get_status") else {}
 	return {
 		"plugin_version": PLUGIN_VERSION,
 		"godot_version": Engine.get_version_info(),
-		"ws_status": "running" if _ws else "stopped",
+		"ws_status": ws_status,
 		"scene_loaded": scene_root != null,
 		"scene_path": scene_root.scene_file_path if scene_root else "",
 		"handler_count": _handlers.size(),
 		"command_count": _router.get_command_list().size(),
 		"game_running": ei.is_playing_scene(),
 		"bridge_connected": _bridge_server.is_bridge_connected() if _bridge_server else false,
+		"bridge_status": bridge_status,
 		"undo_available": true,
 	}
 
@@ -404,12 +407,22 @@ func _doctor(params: Dictionary) -> Dictionary:
 	checks.append({"name": "plugin_enabled", "status": "ok", "message": "Plugin is running"})
 
 	if _ws:
-		checks.append({"name": "websocket", "status": "ok", "message": "WebSocket server is active"})
+		var ws_status: Dictionary = _ws.get_status() if _ws.has_method("get_status") else {}
+		checks.append({"name": "websocket", "status": "ok", "message": "WebSocket server is active", "details": ws_status})
+		if ws_status.get("rejected_connections", 0) > 0:
+			checks.append({"name": "websocket_rejections", "status": "warning", "message": "%d WebSocket connections were rejected" % ws_status.get("rejected_connections", 0)})
+		if ws_status.get("stale_pruned_connections", 0) > 0:
+			checks.append({"name": "websocket_stale_pruned", "status": "warning", "message": "%d stale WebSocket peers were pruned" % ws_status.get("stale_pruned_connections", 0)})
 	else:
 		checks.append({"name": "websocket", "status": "error", "message": "WebSocket server is not running"})
 
 	if _bridge_server:
-		checks.append({"name": "bridge_server", "status": "ok", "message": "Bridge server is active"})
+		var bridge_status: Dictionary = _bridge_server.get_status() if _bridge_server.has_method("get_status") else {}
+		checks.append({"name": "bridge_server", "status": "ok", "message": "Bridge server is active", "details": bridge_status})
+		if bridge_status.get("pending_requests", 0) > 0:
+			checks.append({"name": "bridge_pending_requests", "status": "warning", "message": "%d bridge requests are still pending" % bridge_status.get("pending_requests", 0)})
+		if bridge_status.get("total_timeouts", 0) > 0:
+			checks.append({"name": "bridge_timeouts", "status": "warning", "message": "%d bridge requests have timed out in this session" % bridge_status.get("total_timeouts", 0)})
 	else:
 		checks.append({"name": "bridge_server", "status": "error", "message": "Bridge server is not available"})
 

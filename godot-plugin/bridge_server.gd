@@ -34,6 +34,12 @@ var _bridge_info: Dictionary = {}  # Info from the bridge handshake
 var _trace_enabled: bool = false
 var _trace_log: Array = []  # Array of {command, id, duration_ms, success, error}
 const MAX_TRACE_LOG := 200
+var _last_request_at: float = 0.0
+var _last_response_at: float = 0.0
+var _last_disconnect_reason: String = ""
+var _total_requests_sent: int = 0
+var _total_timeouts: int = 0
+var _total_disconnects: int = 0
 
 
 func start() -> Error:
@@ -54,6 +60,7 @@ func stop() -> void:
 	_is_bridge_connected = false
 	_handshake_received = false
 	_pending_requests.clear()
+	_last_disconnect_reason = "Server stopped"
 	if _server:
 		_server.stop()
 		_server = null
@@ -97,6 +104,8 @@ func poll() -> void:
 			WebSocketPeer.STATE_CLOSED:
 				if _is_bridge_connected:
 					print("[BridgeServer] Bridge disconnected (code: %d)" % _bridge_peer.get_close_code())
+					_total_disconnects += 1
+					_last_disconnect_reason = "Bridge disconnected (code: %d)" % _bridge_peer.get_close_code()
 					_is_bridge_connected = false
 					_handshake_received = false
 					_bridge_info.clear()
@@ -116,6 +125,25 @@ func is_bridge_connected() -> bool:
 
 func get_bridge_info() -> Dictionary:
 	return _bridge_info.duplicate()
+
+
+func get_status() -> Dictionary:
+	return {
+		"running": _server != null,
+		"port": BRIDGE_PORT,
+		"bridge_connected": is_bridge_connected(),
+		"handshake_received": _handshake_received,
+		"pending_requests": _pending_request_count(),
+		"trace_enabled": _trace_enabled,
+		"trace_entries": _trace_log.size(),
+		"last_request_at": _last_request_at,
+		"last_response_at": _last_response_at,
+		"last_disconnect_reason": _last_disconnect_reason,
+		"total_requests_sent": _total_requests_sent,
+		"total_timeouts": _total_timeouts,
+		"total_disconnects": _total_disconnects,
+		"bridge_info": _bridge_info.duplicate(),
+	}
 
 
 func set_trace_enabled(enabled: bool) -> void:
@@ -152,9 +180,11 @@ func send_command(command: String, params: Dictionary = {}) -> String:
 	}
 
 	_bridge_peer.send_text(JSON.stringify(message))
+	_last_request_at = Time.get_unix_time_from_system()
+	_total_requests_sent += 1
 
 	_pending_requests[request_id] = {
-		"time": Time.get_unix_time_from_system(),
+		"time": _last_request_at,
 		"command": command,
 	}
 
@@ -179,6 +209,7 @@ func send_command_await(command: String, params: Dictionary = {}) -> Dictionary:
 	while _pending_requests.has(request_id):
 		if Time.get_unix_time_from_system() > timeout_time:
 			_pending_requests.erase(request_id)
+			_total_timeouts += 1
 			_trace_command(command, request_id, start_time, false, "TIMEOUT")
 			return {"error": "Bridge request timed out after %s seconds" % str(timeout), "code": "BRIDGE_TIMEOUT"}
 		# Yield for one frame so the bridge can receive the response
@@ -236,6 +267,7 @@ func _handle_bridge_message(data: String) -> void:
 
 	# Remove from pending
 	_pending_requests.erase(id)
+	_last_response_at = Time.get_unix_time_from_system()
 
 	# Extract result
 	var result: Dictionary = {}
@@ -271,6 +303,7 @@ func _check_timeouts() -> void:
 	for id in timed_out:
 		push_warning("[BridgeServer] Request %s timed out (command: %s)" % [id, _pending_requests[id].get("command", "?")])
 		_pending_requests.erase(id)
+		_total_timeouts += 1
 		# Store timeout error as response
 		_pending_requests["_response_" + id] = {
 			"error": "Bridge request timed out",
@@ -290,6 +323,14 @@ func _fail_pending_requests(reason: String) -> void:
 		var error_result := {"error": reason, "code": "BRIDGE_DISCONNECTED"}
 		_pending_requests["_response_" + id] = error_result
 		bridge_response_received.emit(id, error_result)
+
+
+func _pending_request_count() -> int:
+	var count := 0
+	for id in _pending_requests:
+		if not str(id).begins_with("_response_"):
+			count += 1
+	return count
 
 
 func _trace_command(command: String, id: String, start_time: float, success: bool, error_msg: String = "") -> void:

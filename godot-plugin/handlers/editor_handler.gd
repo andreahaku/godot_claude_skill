@@ -238,10 +238,19 @@ func reload_plugin(params: Dictionary) -> Dictionary:
 	if plugin_name == "":
 		return {"error": "plugin_name parameter is required", "code": "MISSING_PARAM"}
 
+	var normalized := plugin_name.to_lower().replace(" ", "").replace("_", "")
+	var unsafe_self_reload: bool = params.get("unsafe_self_reload", false)
+	if normalized == "godotclaudeskill" and not unsafe_self_reload:
+		return {
+			"reloaded": false,
+			"manual_action_required": true,
+			"warning": "Self-reload of GodotClaudeSkill from inside the running plugin is not reliable. Disable and re-enable it from Project Settings > Plugins.",
+		}
+
 	# Disable and re-enable the plugin
-	_editor.set_plugin_enabled(plugin_name, false)
-	_editor.set_plugin_enabled(plugin_name, true)
-	return {"reloaded": plugin_name}
+	_editor.call_deferred("set_plugin_enabled", plugin_name, false)
+	_editor.call_deferred("set_plugin_enabled", plugin_name, true)
+	return {"reloading": plugin_name, "mode": "deferred", "warning": "Reload is deferred and may briefly interrupt the WebSocket server"}
 
 
 func reload_project(params: Dictionary) -> Dictionary:
