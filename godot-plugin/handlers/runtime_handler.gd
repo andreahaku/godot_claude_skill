@@ -2,6 +2,8 @@
 class_name RuntimeHandler
 extends RefCounted
 
+const TypeParser = preload("res://addons/godot_claude_skill/utils/type_parser.gd")
+
 ## Runtime Analysis tools (16):
 ## get_game_scene_tree, get_game_node_properties, set_game_node_properties,
 ## execute_game_script, capture_frames, monitor_properties,
@@ -24,7 +26,7 @@ const MAX_RECORDING_EVENTS := 10000
 const MAX_RECORDING_DURATION := 300.0  # 5 minutes in seconds
 
 var _editor: EditorInterface
-var _bridge: BridgeServer
+var _bridge
 var _recording_events: Array = []
 var _is_recording: bool = false
 var _recording_start_time: float = 0.0
@@ -32,7 +34,7 @@ var _recording_max_events: int = 10000
 var _recording_max_duration: float = 300.0
 
 
-func _init(editor: EditorInterface, bridge: BridgeServer):
+func _init(editor: EditorInterface, bridge):
 	_editor = editor
 	_bridge = bridge
 
@@ -161,7 +163,7 @@ func capture_frames(params: Dictionary) -> Dictionary:
 	var check := _require_bridge()
 	if check.has("error"):
 		if _editor.is_playing_scene() and not _bridge.is_bridge_connected():
-			return _fallback_capture_frames(params)
+			return await _fallback_capture_frames(params)
 		return check
 
 	var count: int = params.get("count", 1)
@@ -175,7 +177,7 @@ func capture_frames(params: Dictionary) -> Dictionary:
 			await Engine.get_main_loop().create_timer(interval).timeout
 
 		var save_path := "%s/frame_%03d.png" % [save_dir, i]
-		var result := await _bridge.send_command_await("bridge_capture_screenshot", {"save_path": save_path})
+		var result: Dictionary = await _bridge.send_command_await("bridge_capture_screenshot", {"save_path": save_path})
 		if result.has("error"):
 			frames.append({"frame": i, "error": result["error"]})
 		else:
@@ -188,7 +190,7 @@ func monitor_properties(params: Dictionary) -> Dictionary:
 	var check := _require_bridge()
 	if check.has("error"):
 		if _editor.is_playing_scene() and not _bridge.is_bridge_connected():
-			return _fallback_monitor_properties(params)
+			return await _fallback_monitor_properties(params)
 		return check
 
 	var node_path: String = params.get("node_path", "")
@@ -203,7 +205,7 @@ func monitor_properties(params: Dictionary) -> Dictionary:
 	var timeline: Array = []
 	var elapsed: float = 0.0
 	while elapsed < duration:
-		var result := await _bridge.send_command_await("bridge_get_node_properties", {"node_path": node_path})
+		var result: Dictionary = await _bridge.send_command_await("bridge_get_node_properties", {"node_path": node_path})
 		if result.has("error"):
 			return result
 
@@ -247,7 +249,7 @@ func wait_for_node(params: Dictionary) -> Dictionary:
 	var check := _require_bridge()
 	if check.has("error"):
 		if _editor.is_playing_scene() and not _bridge.is_bridge_connected():
-			return _fallback_wait_for_node(params)
+			return await _fallback_wait_for_node(params)
 		return check
 
 	var node_path: String = params.get("node_path", "")
@@ -258,7 +260,7 @@ func wait_for_node(params: Dictionary) -> Dictionary:
 	# Poll the bridge repeatedly until node is found or timeout
 	var elapsed: float = 0.0
 	while elapsed < timeout:
-		var result := await _bridge.send_command_await("bridge_get_node_properties", {"node_path": node_path})
+		var result: Dictionary = await _bridge.send_command_await("bridge_get_node_properties", {"node_path": node_path})
 		if not result.has("error"):
 			return {"found": true, "node_path": node_path, "waited": elapsed}
 
@@ -391,7 +393,7 @@ func batch_get_properties(params: Dictionary) -> Dictionary:
 		for query in queries:
 			var node_path: String = query.get("node_path", "")
 			var properties: Array = query.get("properties", [])
-			var result := await _bridge.send_command_await("bridge_get_node_properties", {"node_path": node_path})
+			var result: Dictionary = await _bridge.send_command_await("bridge_get_node_properties", {"node_path": node_path})
 			if result.has("error"):
 				results.append({"node_path": node_path, "error": result["error"]})
 			else:

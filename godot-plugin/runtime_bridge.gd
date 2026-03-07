@@ -1,5 +1,4 @@
 # NOT @tool -- this runs in the game process, not the editor
-class_name GodotClaudeRuntimeBridge
 extends Node
 
 ## Runtime bridge that runs inside the game process.

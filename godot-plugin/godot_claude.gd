@@ -7,6 +7,7 @@ extends EditorPlugin
 
 const WS_PORT := 9080
 const PLUGIN_VERSION := "1.1.0"
+const RuntimeHandlerScript = preload("res://addons/godot_claude_skill/handlers/runtime_handler.gd")
 
 var _ws: GodotClaudeWS
 var _router: CommandRouter
@@ -51,13 +52,13 @@ func _enter_tree() -> void:
 	ei_signals.get_resource_filesystem().filesystem_changed.connect(func(): _event_bus.emit_event("filesystem_changed", {}))
 	# Scene change detection
 	get_tree().node_added.connect(func(node: Node):
-		if _event_bus.get_subscribers_for_event("node_added").size() > 0:
+		if _event_bus and _event_bus.get_subscribers_for_event("node_added").size() > 0:
 			var root = ei_signals.get_edited_scene_root()
 			if root and node.is_inside_tree() and root.is_ancestor_of(node):
 				_event_bus.emit_event("node_added", {"name": str(node.name), "type": node.get_class()})
 	)
 	get_tree().node_removed.connect(func(node: Node):
-		if _event_bus.get_subscribers_for_event("node_removed").size() > 0:
+		if _event_bus and _event_bus.get_subscribers_for_event("node_removed").size() > 0:
 			_event_bus.emit_event("node_removed", {"name": str(node.name), "type": node.get_class()})
 	)
 
@@ -74,7 +75,7 @@ func _enter_tree() -> void:
 		[ScriptHandler, [ei, _undo]],
 		[EditorHandler, [ei, self]],
 		[InputHandler, [ei]],
-		[RuntimeHandler, [ei, _bridge_server]],
+		[RuntimeHandlerScript, [ei, _bridge_server]],
 		[AnimationHandler, [ei, _undo]],
 		[AnimationTreeHandler, [ei, _undo]],
 		[TileMapHandler, [ei, _undo]],
@@ -100,7 +101,7 @@ func _enter_tree() -> void:
 		var handler = _create_handler(config[0], config[1])
 		if handler:
 			_handlers.append(handler)
-			var commands := handler.get_commands()
+			var commands: Dictionary = handler.get_commands()
 			_router.register_all(commands, handler)
 			# Mark commands from undo-using handlers as undoable (merge with existing metadata)
 			if _undo in config[1]:
