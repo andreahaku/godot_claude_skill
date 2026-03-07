@@ -263,6 +263,10 @@ func import_audio_asset(params: Dictionary) -> Dictionary:
 		"imported": true,
 		"resource_type": stream.get_class() if stream else "unknown",
 	}
+
+	# Update manifest sidecar if it exists
+	_update_manifest_godot(audio_path, {"imported": true}, "")
+
 	return info
 
 
@@ -378,6 +382,11 @@ func attach_audio_stream(params: Dictionary) -> Dictionary:
 		result["bus"] = bus
 	if autoplay != null:
 		result["autoplay"] = bool(autoplay)
+
+	# Update manifest sidecar if it exists
+	var node_path_str := str(root.get_path_to(node))
+	_update_manifest_godot(audio_path, {"bus": bus} if bus != "" else {}, node_path_str)
+
 	return result
 
 
@@ -483,3 +492,48 @@ func create_audio_randomizer(params: Dictionary) -> Dictionary:
 	if not failed.is_empty():
 		result["failed_paths"] = failed
 	return result
+
+
+## Update the .audio.json manifest sidecar's `godot` section.
+## extra_godot_fields: merged into manifest.godot (e.g. {"bus": "SFX", "imported": true})
+## attached_node_path: if non-empty, appended (unique) to manifest.godot.attached_nodes
+func _update_manifest_godot(audio_path: String, extra_godot_fields: Dictionary, attached_node_path: String) -> void:
+	var manifest_path := audio_path.get_basename() + ".audio.json"
+	var manifest_global := ProjectSettings.globalize_path(manifest_path)
+	if not FileAccess.file_exists(manifest_global):
+		return
+
+	var file := FileAccess.open(manifest_global, FileAccess.READ)
+	if file == null:
+		return
+	var content := file.get_as_text()
+	file.close()
+
+	var json := JSON.new()
+	if json.parse(content) != OK:
+		return
+
+	var manifest: Dictionary = json.data
+
+	# Ensure godot section exists with defaults
+	if not manifest.has("godot"):
+		manifest["godot"] = {"bus": "", "attached_nodes": [], "imported": false}
+	var godot: Dictionary = manifest["godot"]
+
+	# Merge extra fields (e.g. imported, bus)
+	godot.merge(extra_godot_fields, true)
+
+	# Append unique node path
+	if attached_node_path != "":
+		var nodes: Array = godot.get("attached_nodes", [])
+		if attached_node_path not in nodes:
+			nodes.append(attached_node_path)
+		godot["attached_nodes"] = nodes
+
+	manifest["godot"] = godot
+
+	file = FileAccess.open(manifest_global, FileAccess.WRITE)
+	if file == null:
+		return
+	file.store_string(JSON.stringify(manifest, "  "))
+	file.close()

@@ -431,13 +431,33 @@ func _register_command_metadata() -> void:
 		"get_game_scene_tree", "get_game_node_properties", "set_game_node_properties",
 		"execute_game_script", "capture_frames", "monitor_properties",
 		"find_ui_elements", "click_button_by_text", "wait_for_node",
-		"start_recording", "stop_recording", "replay_recording",
 		"run_test_scenario", "run_stress_test",
 	]
+	# Recording commands are experimental (no event capture pipeline yet)
+	var experimental_commands: Array[String] = [
+		"start_recording", "stop_recording", "replay_recording",
+	]
+	for cmd in experimental_commands:
+		var meta := _router.get_command_metadata(cmd)
+		meta["runtime_only"] = true
+		meta["experimental"] = true
+		meta["safe_for_batch"] = true
+		meta["note"] = "Recording event capture is not yet implemented. Recording appears available but captures no events in normal usage."
+		_router.register_metadata(cmd, meta)
 	for cmd in runtime_commands:
 		var meta := _router.get_command_metadata(cmd)
 		meta["runtime_only"] = true
 		meta["safe_for_batch"] = true
+		_router.register_metadata(cmd, meta)
+
+	# Deprecated commands (still functional but prefer alternatives)
+	var deprecated_commands: Array[String] = [
+		"edit_script",
+	]
+	for cmd in deprecated_commands:
+		var meta := _router.get_command_metadata(cmd)
+		meta["deprecated"] = true
+		meta["note"] = "Prefer patch_script for safer structured edits with conflict detection"
 		_router.register_metadata(cmd, meta)
 
 	# Persistent commands that write to disk (not undoable via UndoRedo)
@@ -445,6 +465,7 @@ func _register_command_metadata() -> void:
 		"create_script", "edit_script",
 		"create_scene", "save_scene", "delete_scene",
 		"cross_scene_set_property",
+		"import_audio_asset",
 	]
 	for cmd in persistent_commands:
 		var meta := _router.get_command_metadata(cmd)
@@ -477,7 +498,7 @@ func _register_command_metadata() -> void:
 		"find_node_references", "get_scene_dependencies",
 		"list_export_presets", "get_export_info",
 		"get_bridge_status",
-		"import_audio_asset", "get_audio_asset_info",
+		"get_audio_asset_info",
 		"subscribe", "unsubscribe", "get_subscriptions",
 		"get_output_log", "get_runtime_errors",
 		"get_modified_files", "get_scene_diff",

@@ -306,7 +306,12 @@ func _batch_best_effort(commands: Array) -> Dictionary:
 
 
 ## Wrap all undoable commands in a single undo action group.
-## Non-undoable commands cause a warning; if any command fails, the action is not committed.
+## IMPORTANT LIMITATIONS:
+## - Handlers that create their own undo actions internally will still commit
+##   those actions separately — true single-action atomicity is not guaranteed.
+## - Non-undoable side effects (file writes, resource saves) cannot be rolled back.
+## - This mode is best-effort: it wraps the batch in an outer undo group and
+##   discards it on failure, but handler-internal undo commits are not prevented.
 func _batch_atomic(commands: Array) -> Dictionary:
 	var start_time := Time.get_ticks_msec()
 

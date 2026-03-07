@@ -86,6 +86,7 @@ func get_game_screenshot(params: Dictionary) -> Dictionary:
 	if not _editor.is_playing_scene():
 		return {"error": "No game is currently running", "code": "NOT_PLAYING"}
 
+	# Editor viewport fallback — captures the editor's view, not the game process
 	var viewport = Engine.get_main_loop().root
 	if viewport == null:
 		return {"error": "Cannot access viewport", "code": "NO_VIEWPORT"}
@@ -94,7 +95,9 @@ func get_game_screenshot(params: Dictionary) -> Dictionary:
 	if img == null:
 		return {"error": "Failed to capture screenshot", "code": "CAPTURE_FAILED"}
 
-	return _save_screenshot(img, save_path, max_width, include_base64)
+	var result := _save_screenshot(img, save_path, max_width, include_base64)
+	result["_note"] = "Screenshot captured from editor viewport. For true game viewport captures, use capture_frames via the runtime bridge."
+	return result
 
 
 func _save_screenshot(img: Image, save_path: String, max_width: int, include_base64: bool) -> Dictionary:
@@ -122,7 +125,11 @@ func _save_screenshot(img: Image, save_path: String, max_width: int, include_bas
 func compare_screenshots(params: Dictionary) -> Dictionary:
 	var path_a: String = params.get("path_a", "")
 	var path_b: String = params.get("path_b", "")
-	var threshold: float = params.get("threshold", 0.01)
+	# Separate thresholds: pixel_threshold for per-pixel color delta, max_diff_ratio for overall match
+	# Legacy compat: if caller passes "threshold" without explicit "max_diff_ratio", map to both
+	var has_legacy_threshold: bool = params.has("threshold") and not params.has("pixel_threshold")
+	var pixel_threshold: float = params.get("pixel_threshold", params.get("threshold", 0.1))
+	var max_diff_ratio: float = params.get("max_diff_ratio", params.get("threshold", 0.01) if has_legacy_threshold else 0.01)
 
 	if path_a == "" or path_b == "":
 		return {"error": "path_a and path_b are required", "code": "MISSING_PARAM"}
@@ -153,15 +160,17 @@ func compare_screenshots(params: Dictionary) -> Dictionary:
 			var ca = img_a.get_pixel(x, y)
 			var cb = img_b.get_pixel(x, y)
 			var diff = abs(ca.r - cb.r) + abs(ca.g - cb.g) + abs(ca.b - cb.b) + abs(ca.a - cb.a)
-			if diff > threshold:
+			if diff > pixel_threshold:
 				diff_count += 1
 
 	var diff_ratio = float(diff_count) / float(total_pixels)
 	return {
-		"match": diff_ratio < threshold,
+		"match": diff_ratio <= max_diff_ratio,
 		"diff_ratio": diff_ratio,
 		"diff_pixels": diff_count,
 		"total_pixels": total_pixels,
+		"pixel_threshold": pixel_threshold,
+		"max_diff_ratio": max_diff_ratio,
 	}
 
 

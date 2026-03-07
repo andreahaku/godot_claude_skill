@@ -99,6 +99,7 @@ func get_commands() -> Dictionary:
 				"path": {"type": "string", "required": true, "description": "Path to the script file to patch"},
 				"expected_hash": {"type": "string", "default": "", "description": "MD5 hash of current content for conflict detection"},
 				"operations": {"type": "array", "required": true, "description": "Array of patch operations: replace_range, replace_exact_block, insert_before_marker, insert_after_marker, append_to_class"},
+			"allow_invalid": {"type": "bool", "default": false, "description": "If true, apply patch even if it causes compilation errors (default: rollback on error)"},
 			},
 			"metadata": {
 				"persistent": true,
@@ -368,6 +369,8 @@ func patch_script(params: Dictionary) -> Dictionary:
 		modified = result.new_content
 		applied.append(i)
 
+	var allow_invalid: bool = params.get("allow_invalid", false)
+
 	# Write modified content
 	file = FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
@@ -377,16 +380,34 @@ func patch_script(params: Dictionary) -> Dictionary:
 
 	_editor.get_resource_filesystem().scan()
 
-	# Reload script
+	# Reload script and check compilation
 	var script = load(path)
 	if script is GDScript:
 		script.source_code = modified
 		var err = script.reload()
 		if err != OK:
-			# Script has errors — report but don't fail (the patch was applied)
-			return {"path": path, "patched": true, "operations_applied": applied.size(),
-				"diff": diff_summary, "new_hash": modified.md5_text(),
-				"warning": "Script has compilation errors after patching"}
+			if allow_invalid:
+				# Caller explicitly allows broken scripts
+				return {"path": path, "patched": true, "operations_applied": applied.size(),
+					"diff": diff_summary, "new_hash": modified.md5_text(),
+					"warning": "Script has compilation errors after patching (allow_invalid=true)"}
+			else:
+				# Rollback: restore original content
+				file = FileAccess.open(path, FileAccess.WRITE)
+				if file == null:
+					return {"error": "Script has compilation errors AND rollback failed (cannot write to %s) — file may be in a broken state" % path,
+						"code": "ROLLBACK_FAILED", "operations_applied": applied.size(),
+						"diff": diff_summary, "rolled_back": false,
+						"hint": "Manually restore the script content"}
+				file.store_string(source)
+				file.close()
+				script.source_code = source
+				script.reload()
+				_editor.get_resource_filesystem().scan()
+				return {"error": "Script has compilation errors after patching — changes rolled back",
+					"code": "COMPILE_ERROR", "operations_applied": applied.size(),
+					"diff": diff_summary, "rolled_back": true,
+					"hint": "Pass allow_invalid=true to apply the patch even if it breaks compilation"}
 
 	return {"path": path, "patched": true, "operations_applied": applied.size(),
 		"diff": diff_summary, "new_hash": modified.md5_text()}

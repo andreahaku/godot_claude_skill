@@ -1,6 +1,6 @@
 # Godot Claude Skill
 
-A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **185 commands across 27 categories** with full undo/redo support, AI asset/audio generation, runtime bridge for true game introspection, event subscriptions, and structured script patching.
+A comprehensive Claude Code skill for controlling the Godot game engine editor in real-time via WebSocket. **194 commands across 27 categories** with full undo/redo support, AI asset/audio generation, runtime bridge for true game introspection, event subscriptions, and structured script patching.
 
 ## Architecture
 
@@ -112,7 +112,7 @@ addons/godot_claude_skill/
 3. Find **GodotClaudeSkill** in the list and check **Enable**
 4. Check the **Output** panel — you should see:
    ```
-   [GodotClaude] Ready! 185 commands available on ws://127.0.0.1:9080
+   [GodotClaude] Ready! 194 commands available on ws://127.0.0.1:9080
    ```
 
 If you don't see this message, check:
@@ -133,7 +133,7 @@ mkdir -p .claude/commands
 cp /path/to/godot_claude_skill/.claude/commands/godot.md .claude/commands/godot.md
 ```
 
-This gives Claude Code the `/godot` slash command with full documentation of all 185 commands.
+This gives Claude Code the `/godot` slash command with full documentation of all 194 commands.
 
 #### 3b. Add CLAUDE.md Instructions (optional but recommended)
 
@@ -853,7 +853,7 @@ Error responses:
 godot_claude_skill/
 ├── .claude/
 │   └── commands/
-│       └── godot.md           # Claude Code skill definition (185 commands documented)
+│       └── godot.md           # Claude Code skill definition (194 commands documented)
 ├── godot-plugin/              # Source files for the Godot EditorPlugin
 │   ├── plugin.cfg
 │   ├── godot_claude.gd        # Main plugin entry point
