@@ -58,7 +58,7 @@ func run_test_scenario(params: Dictionary) -> Dictionary:
 	if steps.is_empty():
 		return {"error": "steps array is required", "code": "MISSING_PARAM"}
 
-	_test_results.clear()
+	var results: Array = []
 	var passed: int = 0
 	var failed: int = 0
 	var skipped: int = 0
@@ -106,7 +106,10 @@ func run_test_scenario(params: Dictionary) -> Dictionary:
 		elif result.get("status") == "fail":
 			failed += 1
 
-		_test_results.append(result)
+		results.append(result)
+
+	# Store last run results for get_test_results
+	_test_results = results.duplicate(true)
 
 	# Save session
 	var session := {
@@ -116,13 +119,13 @@ func run_test_scenario(params: Dictionary) -> Dictionary:
 		"failed": failed,
 		"skipped": skipped,
 		"total": steps.size(),
-		"results": _test_results.duplicate(true),
+		"results": results.duplicate(true),
 	}
 	_test_sessions.append(session)
 	if _test_sessions.size() > MAX_TEST_SESSIONS:
 		_test_sessions.pop_front()
 
-	return {"name": name, "passed": passed, "failed": failed, "skipped": skipped, "total": steps.size(), "results": _test_results}
+	return {"name": name, "passed": passed, "failed": failed, "skipped": skipped, "total": steps.size(), "results": results}
 
 
 # ---------------------------------------------------------------------------
