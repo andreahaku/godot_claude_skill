@@ -56,6 +56,24 @@ interface AudioPostProcessOptions {
   trim_silence?: boolean; // Trim leading/trailing silence
 }
 
+interface AudioFileInfo {
+  extension: string;
+  format: string;
+  mimeType: string;
+}
+
+interface AudioSaveResult {
+  fullPath: string;
+  resPath: string;
+  fileInfo: AudioFileInfo;
+  warnings: string[];
+}
+
+let ffmpegChecked = false;
+let ffmpegAvailable = false;
+let vorbisEncoderChecked = false;
+let vorbisEncoderAvailable = false;
+
 interface VoiceLineOptions {
   text: string;
   output: string;
@@ -144,18 +162,144 @@ function mimeFromFormat(format: string): string {
   return "audio/mpeg";
 }
 
+function extensionFromPath(filePath: string): string {
+  const ext = filePath.split(".").pop()?.toLowerCase() || "";
+  return ext;
+}
+
+function replaceExtension(filePath: string, ext: string): string {
+  if (/\.[^.]+$/.test(filePath)) {
+    return filePath.replace(/\.[^.]+$/, `.${ext}`);
+  }
+  return `${filePath}.${ext}`;
+}
+
+function audioInfoFromExtension(ext: string): AudioFileInfo {
+  switch (ext.toLowerCase()) {
+    case "wav":
+      return { extension: "wav", format: "pcm_44100", mimeType: "audio/wav" };
+    case "ogg":
+      return { extension: "ogg", format: "ogg_vorbis", mimeType: "audio/ogg" };
+    default:
+      return { extension: "mp3", format: "mp3_44100_128", mimeType: "audio/mpeg" };
+  }
+}
+
+function audioInfoFromFormat(format: string): AudioFileInfo {
+  if (format.startsWith("pcm")) {
+    return { extension: "wav", format, mimeType: "audio/wav" };
+  }
+  if (format.startsWith("ogg")) {
+    return { extension: "ogg", format, mimeType: "audio/ogg" };
+  }
+  return { extension: "mp3", format, mimeType: "audio/mpeg" };
+}
+
+function looksLikeMp3(buffer: Buffer): boolean {
+  if (buffer.length < 3) return false;
+  if (buffer.subarray(0, 3).toString("ascii") === "ID3") return true;
+  return buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0;
+}
+
+function detectAudioInfo(
+  buffer: Buffer,
+  contentType: string,
+  fallbackFormat: string
+): AudioFileInfo {
+  const normalizedType = contentType.toLowerCase();
+  if (
+    buffer.length >= 4 &&
+    buffer.subarray(0, 4).toString("ascii") === "OggS"
+  ) {
+    return { extension: "ogg", format: "ogg_vorbis", mimeType: "audio/ogg" };
+  }
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString("ascii") === "RIFF" &&
+    buffer.subarray(8, 12).toString("ascii") === "WAVE"
+  ) {
+    return { extension: "wav", format: "pcm_44100", mimeType: "audio/wav" };
+  }
+  if (looksLikeMp3(buffer)) {
+    return { extension: "mp3", format: "mp3_44100_128", mimeType: "audio/mpeg" };
+  }
+  if (normalizedType.includes("ogg")) {
+    return { extension: "ogg", format: "ogg_vorbis", mimeType: "audio/ogg" };
+  }
+  if (normalizedType.includes("wav") || normalizedType.includes("wave")) {
+    return { extension: "wav", format: "pcm_44100", mimeType: "audio/wav" };
+  }
+  if (normalizedType.includes("mpeg") || normalizedType.includes("mp3")) {
+    return { extension: "mp3", format: "mp3_44100_128", mimeType: "audio/mpeg" };
+  }
+  return audioInfoFromFormat(fallbackFormat);
+}
+
+function ensureFfmpegAvailable(): void {
+  if (ffmpegChecked) {
+    if (!ffmpegAvailable) {
+      throw new Error("ffmpeg is required for audio post-processing but was not found");
+    }
+    return;
+  }
+
+  ffmpegChecked = true;
+  try {
+    execSync("which ffmpeg", { encoding: "utf-8", stdio: "pipe" });
+    ffmpegAvailable = true;
+  } catch {
+    ffmpegAvailable = false;
+    throw new Error("ffmpeg is required for audio post-processing but was not found");
+  }
+}
+
+function ensureVorbisEncoderAvailable(): void {
+  ensureFfmpegAvailable();
+  if (vorbisEncoderChecked) {
+    if (!vorbisEncoderAvailable) {
+      throw new Error('convert_to:"ogg" requires FFmpeg with libvorbis support');
+    }
+    return;
+  }
+
+  vorbisEncoderChecked = true;
+  try {
+    const encoders = execSync("ffmpeg -hide_banner -encoders", {
+      encoding: "utf-8",
+      stdio: "pipe",
+      timeout: 30000,
+    });
+    vorbisEncoderAvailable = encoders.includes("libvorbis");
+  } catch {
+    vorbisEncoderAvailable = false;
+  }
+
+  if (!vorbisEncoderAvailable) {
+    throw new Error('convert_to:"ogg" requires FFmpeg with libvorbis support');
+  }
+}
+
 // --- Post-Processing ---
 
 function postProcessAudio(
   filePath: string,
   opts: AudioPostProcessOptions
-): string {
-  // Check if ffmpeg is available
-  try {
-    execSync("which ffmpeg", { encoding: "utf-8", stdio: "pipe" });
-  } catch {
-    console.error("[audio] ffmpeg not found, skipping post-processing");
-    return filePath;
+): { path: string; warnings: string[] } {
+  const warnings: string[] = [];
+
+  if (opts.convert_to) {
+    ensureFfmpegAvailable();
+    if (opts.convert_to.toLowerCase() === "ogg") {
+      ensureVorbisEncoderAvailable();
+    }
+  } else if (opts.normalize || opts.trim_silence) {
+    try {
+      ensureFfmpegAvailable();
+    } catch {
+      warnings.push("ffmpeg not found; skipped post-processing");
+      console.error("[audio] ffmpeg not found, skipping post-processing");
+      return { path: filePath, warnings };
+    }
   }
 
   let currentPath = filePath;
@@ -172,6 +316,7 @@ function postProcessAudio(
       renameSync(tmpPath, currentPath);
       console.error(`[audio] Normalized: ${currentPath}`);
     } catch (err) {
+      warnings.push("Normalization failed; kept original audio levels");
       console.error(`[audio] Normalization failed: ${err}`);
     }
   }
@@ -188,6 +333,7 @@ function postProcessAudio(
       renameSync(tmpPath, currentPath);
       console.error(`[audio] Trimmed silence: ${currentPath}`);
     } catch (err) {
+      warnings.push("Silence trimming failed; kept original timing");
       console.error(`[audio] Silence trimming failed: ${err}`);
     }
   }
@@ -207,12 +353,76 @@ function postProcessAudio(
         currentPath = newPath;
         console.error(`[audio] Converted to ${ext}: ${currentPath}`);
       } catch (err) {
+        if (ext === "ogg") {
+          throw new Error(
+            `Failed to convert audio to ogg: ${String(err)}`
+          );
+        }
+        warnings.push(
+          `Failed to convert audio to ${ext}; kept ${extensionFromPath(currentPath) || "original"} output`
+        );
         console.error(`[audio] Format conversion failed: ${err}`);
       }
     }
   }
 
-  return currentPath;
+  return { path: currentPath, warnings };
+}
+
+async function saveGeneratedAudio(
+  audio: Buffer,
+  contentType: string,
+  requestedFullPath: string,
+  requestedResPath: string,
+  requestedFormat: string,
+  postProcessOpts: AudioPostProcessOptions
+): Promise<AudioSaveResult> {
+  const warnings: string[] = [];
+  const detectedInfo = detectAudioInfo(audio, contentType, requestedFormat);
+  let fullPath = requestedFullPath;
+  let resPath = requestedResPath;
+
+  const requestedExt = extensionFromPath(requestedFullPath);
+  if (requestedExt !== detectedInfo.extension) {
+    fullPath = replaceExtension(requestedFullPath, detectedInfo.extension);
+    resPath = replaceExtension(requestedResPath, detectedInfo.extension);
+    warnings.push(
+      `Provider returned ${detectedInfo.format}; saved as .${detectedInfo.extension} instead of requested .${requestedExt || "unknown"}`
+    );
+  }
+
+  mkdirSync(dirname(fullPath), { recursive: true });
+  await Bun.write(fullPath, audio);
+  console.error(`Audio saved: ${fullPath} (${audio.length} bytes)`);
+
+  let finalInfo = detectedInfo;
+  if (
+    postProcessOpts.normalize ||
+    postProcessOpts.trim_silence ||
+    postProcessOpts.convert_to
+  ) {
+    try {
+      const processed = postProcessAudio(fullPath, postProcessOpts);
+      warnings.push(...processed.warnings);
+      if (processed.path !== fullPath) {
+        fullPath = processed.path;
+        resPath = replaceExtension(resPath, extensionFromPath(processed.path));
+        finalInfo = audioInfoFromExtension(extensionFromPath(processed.path));
+      }
+    } catch (err) {
+      if (postProcessOpts.convert_to && existsSync(fullPath)) {
+        unlinkSync(fullPath);
+      }
+      throw err;
+    }
+  }
+
+  return {
+    fullPath,
+    resPath,
+    fileInfo: finalInfo,
+    warnings,
+  };
 }
 
 // --- Commands ---
@@ -223,11 +433,9 @@ async function handleVoiceLine(opts: VoiceLineOptions): Promise<void> {
   if (!opts.output) throw new Error("output is required");
 
   const projectDir = resolveProjectDir(opts.project);
-  let { fullPath, resPath } = resolveOutputPath(opts.output, projectDir);
-  const format = opts.format || formatFromOutput(opts.output);
+  const requested = resolveOutputPath(opts.output, projectDir);
+  const requestedFormat = opts.format || formatFromOutput(opts.output);
   const resolvedVoiceId = resolveVoicePreset(opts.voice_id);
-
-  mkdirSync(dirname(fullPath), { recursive: true });
 
   const req: VoiceLineRequest = {
     text: opts.text,
@@ -236,25 +444,22 @@ async function handleVoiceLine(opts: VoiceLineOptions): Promise<void> {
     language_code: opts.language_code,
     voice_settings: opts.voice_settings,
     seed: opts.seed,
-    output_format: format,
+    output_format: requestedFormat,
   };
 
   const result = await generateVoiceLine(req);
-  await Bun.write(fullPath, result.audio);
-  console.error(`Audio saved: ${fullPath} (${result.audio.length} bytes)`);
-
-  // Post-process if any options are set
-  if (opts.normalize || opts.trim_silence || opts.convert_to) {
-    const processedPath = postProcessAudio(fullPath, {
+  const saved = await saveGeneratedAudio(
+    result.audio,
+    result.content_type,
+    requested.fullPath,
+    requested.resPath,
+    requestedFormat,
+    {
       normalize: opts.normalize,
       trim_silence: opts.trim_silence,
       convert_to: opts.convert_to,
-    });
-    if (processedPath !== fullPath) {
-      fullPath = processedPath;
-      resPath = resPath.replace(/\.[^.]+$/, fullPath.slice(fullPath.lastIndexOf(".")));
     }
-  }
+  );
 
   let manifestPath: string | undefined;
   if (!opts.no_manifest) {
@@ -263,9 +468,12 @@ async function handleVoiceLine(opts: VoiceLineOptions): Promise<void> {
       provider: result.provider,
       text: opts.text,
       model: result.model,
-      asset_path: resPath,
-      format,
-      mime_type: result.content_type,
+      asset_path: saved.resPath,
+      format: saved.fileInfo.format,
+      mime_type: saved.fileInfo.mimeType,
+      requested_asset_path: requested.resPath,
+      requested_format: requestedFormat,
+      requested_mime_type: mimeFromFormat(requestedFormat),
       voice_id: resolvedVoiceId,
       language_code: opts.language_code,
       seed: opts.seed,
@@ -275,8 +483,8 @@ async function handleVoiceLine(opts: VoiceLineOptions): Promise<void> {
       request_id: result.request_id,
     };
     const manifest = createManifest(input);
-    writeManifest(fullPath, manifest);
-    manifestPath = manifestResPathFor(resPath);
+    writeManifest(saved.fullPath, manifest);
+    manifestPath = manifestResPathFor(saved.resPath);
   }
 
   const bus = opts.bus || "Voice";
@@ -285,19 +493,23 @@ async function handleVoiceLine(opts: VoiceLineOptions): Promise<void> {
       {
         success: true,
         type: "voice_line",
-        asset_path: resPath,
+        asset_path: saved.resPath,
+        requested_asset_path: requested.resPath,
         manifest_path: manifestPath,
         provider: "elevenlabs",
         model: result.model,
+        format: saved.fileInfo.format,
+        mime_type: saved.fileInfo.mimeType,
         bytes: result.audio.length,
+        warnings: saved.warnings,
         suggested_next: [
           {
             command: "import_audio_asset",
-            params: { audio_path: resPath },
+            params: { audio_path: saved.resPath },
           },
           {
             command: "attach_audio_stream",
-            params: { audio_path: resPath, bus },
+            params: { audio_path: saved.resPath, bus },
           },
         ],
       },
@@ -312,34 +524,29 @@ async function handleSfx(opts: SfxOptions): Promise<void> {
   if (!opts.output) throw new Error("output is required");
 
   const projectDir = resolveProjectDir(opts.project);
-  let { fullPath, resPath } = resolveOutputPath(opts.output, projectDir);
-  const format = opts.format || formatFromOutput(opts.output);
-
-  mkdirSync(dirname(fullPath), { recursive: true });
+  const requested = resolveOutputPath(opts.output, projectDir);
+  const requestedFormat = opts.format || formatFromOutput(opts.output);
 
   const req: SfxRequest = {
     text: opts.text,
     duration_seconds: opts.duration_seconds,
     prompt_influence: opts.prompt_influence,
-    output_format: format,
+    output_format: requestedFormat,
   };
 
   const result = await generateSfx(req);
-  await Bun.write(fullPath, result.audio);
-  console.error(`Audio saved: ${fullPath} (${result.audio.length} bytes)`);
-
-  // Post-process if any options are set
-  if (opts.normalize || opts.trim_silence || opts.convert_to) {
-    const processedPath = postProcessAudio(fullPath, {
+  const saved = await saveGeneratedAudio(
+    result.audio,
+    result.content_type,
+    requested.fullPath,
+    requested.resPath,
+    requestedFormat,
+    {
       normalize: opts.normalize,
       trim_silence: opts.trim_silence,
       convert_to: opts.convert_to,
-    });
-    if (processedPath !== fullPath) {
-      fullPath = processedPath;
-      resPath = resPath.replace(/\.[^.]+$/, fullPath.slice(fullPath.lastIndexOf(".")));
     }
-  }
+  );
 
   const audioType = opts.loop ? "ambient_loop" : "sfx";
   let manifestPath: string | undefined;
@@ -349,9 +556,12 @@ async function handleSfx(opts: SfxOptions): Promise<void> {
       provider: result.provider,
       text: opts.text,
       model: result.model,
-      asset_path: resPath,
-      format,
-      mime_type: result.content_type,
+      asset_path: saved.resPath,
+      format: saved.fileInfo.format,
+      mime_type: saved.fileInfo.mimeType,
+      requested_asset_path: requested.resPath,
+      requested_format: requestedFormat,
+      requested_mime_type: mimeFromFormat(requestedFormat),
       duration_seconds: opts.duration_seconds,
       prompt_influence: opts.prompt_influence,
       loop: opts.loop,
@@ -360,8 +570,8 @@ async function handleSfx(opts: SfxOptions): Promise<void> {
       request_id: result.request_id,
     };
     const manifest = createManifest(input);
-    writeManifest(fullPath, manifest);
-    manifestPath = manifestResPathFor(resPath);
+    writeManifest(saved.fullPath, manifest);
+    manifestPath = manifestResPathFor(saved.resPath);
   }
 
   const bus = opts.bus || (opts.loop ? "Ambience" : "SFX");
@@ -370,19 +580,23 @@ async function handleSfx(opts: SfxOptions): Promise<void> {
       {
         success: true,
         type: audioType,
-        asset_path: resPath,
+        asset_path: saved.resPath,
+        requested_asset_path: requested.resPath,
         manifest_path: manifestPath,
         provider: "elevenlabs",
         model: result.model,
+        format: saved.fileInfo.format,
+        mime_type: saved.fileInfo.mimeType,
         bytes: result.audio.length,
+        warnings: saved.warnings,
         suggested_next: [
           {
             command: "import_audio_asset",
-            params: { audio_path: resPath },
+            params: { audio_path: saved.resPath },
           },
           {
             command: "attach_audio_stream",
-            params: { audio_path: resPath, bus },
+            params: { audio_path: saved.resPath, bus },
           },
         ],
       },
@@ -452,8 +666,16 @@ async function handleInspect(opts: InspectOptions): Promise<void> {
     info.source_text = manifest.source.text;
     info.model = manifest.source.model;
     info.format = manifest.output.format;
+    info.mime_type = manifest.output.mime_type;
+    info.godot_import_path = manifest.output.asset_path;
     info.bus = manifest.godot.bus;
     info.tags = manifest.tags;
+    if (manifest.output.requested_asset_path) {
+      info.requested_file = manifest.output.requested_asset_path;
+    }
+    if (manifest.output.requested_format) {
+      info.requested_format = manifest.output.requested_format;
+    }
     if (manifest.source.voice_id) info.voice_id = manifest.source.voice_id;
     if (manifest.regeneration.history.length > 0) {
       info.regeneration_count = manifest.regeneration.history.length;
@@ -499,7 +721,14 @@ async function handleRegenerate(opts: RegenerateOptions): Promise<void> {
     };
 
     const result = await generateVoiceLine(req);
-    await Bun.write(fullPath, result.audio);
+    const saved = await saveGeneratedAudio(
+      result.audio,
+      result.content_type,
+      fullPath,
+      resPath,
+      existingManifest.output.format,
+      {}
+    );
 
     if (!opts.no_manifest) {
       const input: ManifestInput = {
@@ -507,9 +736,12 @@ async function handleRegenerate(opts: RegenerateOptions): Promise<void> {
         provider: result.provider,
         text: source.text,
         model: result.model,
-        asset_path: resPath,
-        format: existingManifest.output.format,
-        mime_type: result.content_type,
+        asset_path: saved.resPath,
+        format: saved.fileInfo.format,
+        mime_type: saved.fileInfo.mimeType,
+        requested_asset_path: existingManifest.output.requested_asset_path,
+        requested_format: existingManifest.output.requested_format,
+        requested_mime_type: existingManifest.output.requested_mime_type,
         voice_id: source.voice_id,
         language_code: source.language_code,
         seed: source.seed,
@@ -523,16 +755,19 @@ async function handleRegenerate(opts: RegenerateOptions): Promise<void> {
         previousManifestPath,
         existingManifest
       );
-      writeManifest(fullPath, manifest);
+      writeManifest(saved.fullPath, manifest);
     }
 
     console.log(
       JSON.stringify({
         success: true,
         type: "voice_line",
-        asset_path: resPath,
+        asset_path: saved.resPath,
         regenerated: true,
         bytes: result.audio.length,
+        format: saved.fileInfo.format,
+        mime_type: saved.fileInfo.mimeType,
+        warnings: saved.warnings,
       })
     );
   } else {
@@ -545,7 +780,14 @@ async function handleRegenerate(opts: RegenerateOptions): Promise<void> {
     };
 
     const result = await generateSfx(req);
-    await Bun.write(fullPath, result.audio);
+    const saved = await saveGeneratedAudio(
+      result.audio,
+      result.content_type,
+      fullPath,
+      resPath,
+      existingManifest.output.format,
+      {}
+    );
 
     if (!opts.no_manifest) {
       const input: ManifestInput = {
@@ -553,9 +795,12 @@ async function handleRegenerate(opts: RegenerateOptions): Promise<void> {
         provider: result.provider,
         text: source.text,
         model: result.model,
-        asset_path: resPath,
-        format: existingManifest.output.format,
-        mime_type: result.content_type,
+        asset_path: saved.resPath,
+        format: saved.fileInfo.format,
+        mime_type: saved.fileInfo.mimeType,
+        requested_asset_path: existingManifest.output.requested_asset_path,
+        requested_format: existingManifest.output.requested_format,
+        requested_mime_type: existingManifest.output.requested_mime_type,
         duration_seconds: source.duration_seconds,
         prompt_influence: source.prompt_influence,
         loop: source.loop,
@@ -568,16 +813,19 @@ async function handleRegenerate(opts: RegenerateOptions): Promise<void> {
         previousManifestPath,
         existingManifest
       );
-      writeManifest(fullPath, manifest);
+      writeManifest(saved.fullPath, manifest);
     }
 
     console.log(
       JSON.stringify({
         success: true,
         type: existingManifest.type,
-        asset_path: resPath,
+        asset_path: saved.resPath,
         regenerated: true,
         bytes: result.audio.length,
+        format: saved.fileInfo.format,
+        mime_type: saved.fileInfo.mimeType,
+        warnings: saved.warnings,
       })
     );
   }

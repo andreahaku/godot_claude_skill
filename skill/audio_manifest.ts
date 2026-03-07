@@ -31,6 +31,9 @@ export interface AudioManifest {
     manifest_path: string;
     format: string;
     mime_type: string;
+    requested_asset_path?: string;
+    requested_format?: string;
+    requested_mime_type?: string;
   };
   godot: {
     bus: string;
@@ -59,6 +62,9 @@ export interface ManifestInput {
   asset_path: string;
   format: string;
   mime_type: string;
+  requested_asset_path?: string;
+  requested_format?: string;
+  requested_mime_type?: string;
   voice_id?: string;
   language_code?: string;
   seed?: number;
@@ -132,6 +138,9 @@ export function createManifest(input: ManifestInput): AudioManifest {
       manifest_path: manifestPath,
       format: input.format,
       mime_type: input.mime_type,
+      requested_asset_path: input.requested_asset_path,
+      requested_format: input.requested_format,
+      requested_mime_type: input.requested_mime_type,
     },
     godot: {
       bus: input.bus || defaultBus(input.type),

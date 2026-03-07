@@ -245,29 +245,52 @@ func _find_audio_players(node: Node, results: Array, depth: int = 0, max_depth: 
 
 func import_audio_asset(params: Dictionary) -> Dictionary:
 	var audio_path: String = params.get("audio_path", "")
+	var max_attempts: int = params.get("max_attempts", 6)
+	var retry_delay: float = params.get("retry_delay", 0.5)
 	if audio_path == "":
 		return {"error": "audio_path is required", "code": "MISSING_PARAM"}
 	if not audio_path.begins_with("res://"):
 		audio_path = "res://" + audio_path
 
-	# Trigger filesystem rescan so Godot imports the file
-	_scan_helper.force_scan()
+	var import_result: Dictionary = await _import_audio_with_retry(audio_path, max_attempts, retry_delay)
+	var stream = import_result.get("stream")
+	if stream == null:
+		return {
+			"error": "Audio file not found after import: %s" % audio_path,
+			"code": "IMPORT_ERROR",
+			"attempts": import_result.get("attempts", max_attempts),
+			"retry_delay": retry_delay,
+		}
 
-	# Check if the resource exists after scan
-	if not ResourceLoader.exists(audio_path):
-		return {"error": "Audio file not found after import: %s" % audio_path, "code": "IMPORT_ERROR"}
-
-	var stream = load(audio_path)
 	var info: Dictionary = {
 		"audio_path": audio_path,
 		"imported": true,
-		"resource_type": stream.get_class() if stream else "unknown",
+		"resource_type": stream.get_class(),
+		"attempts": import_result.get("attempts", 1),
 	}
 
 	# Update manifest sidecar if it exists
 	_update_manifest_godot(audio_path, {"imported": true}, "")
 
 	return info
+
+
+func _import_audio_with_retry(audio_path: String, max_attempts: int, retry_delay: float):
+	var attempts := maxi(max_attempts, 1)
+	var delay := maxf(retry_delay, 0.05)
+
+	for attempt in range(attempts):
+		_scan_helper.force_scan()
+
+		if ResourceLoader.exists(audio_path):
+			var stream = load(audio_path)
+			if stream is AudioStream:
+				return {"stream": stream, "attempts": attempt + 1}
+
+		if attempt < attempts - 1:
+			await Engine.get_main_loop().create_timer(delay).timeout
+
+	return {"stream": null, "attempts": attempts}
 
 
 func get_audio_asset_info(params: Dictionary) -> Dictionary:
