@@ -188,7 +188,7 @@ You: Add a script to the player with basic movement
 Claude: (creates GDScript, attaches it to the player node)
 ```
 
-## Features (27 Categories, 185 Commands)
+## Features (27 Categories, 194 Commands)
 
 | Category | Count | Highlights |
 |---|---|---|
@@ -211,7 +211,7 @@ Claude: (creates GDScript, attaches it to the player node)
 | **Shader** | 6 | Create/edit GLSL, assign materials, set/get uniforms |
 | **Resource** | 3 | Read/edit/create .tres files of any type |
 | **Batch & Refactoring** | 6 | Find by type, audit signals, bulk property changes, cross-scene |
-| **Testing & QA** | 5 | Automated test scenarios, assertions, stress testing |
+| **Testing & QA** | 5 | Automated test scenarios with 14 step types, assertions, stress testing |
 | **Code Analysis** | 7 | Unused resources, signal flow, complexity, circular deps, ClassDB lookup |
 | **Profiling** | 4 | FPS, memory, render metrics, snapshot history with trend analysis |
 | **Asset Management** | 7 | Sprite textures, sprite frames, atlas textures, import presets, NinePatch, spritesheet validation |
@@ -248,14 +248,24 @@ String values in command params are automatically parsed into Godot types:
 
 ### Input Simulation & Recording
 
-Simulate keyboard, mouse, and input actions in the running game. Supports multi-step sequences with waits:
+Simulate keyboard, mouse, and input actions in the running game. When the runtime bridge is connected, input is injected directly into the game process for real gameplay automation. Otherwise, falls back to editor-side input. Supports duration-based hold, auto-release, and multi-step sequences:
 
 ```bash
+# Hold an action for 0.5 seconds (press, wait, release)
+bun ws_send.ts simulate_action '{"action":"ui_right","duration":0.5}'
+
+# Multi-step sequence
 bun ws_send.ts simulate_sequence '{"steps":[
-  {"type":"key","key":"RIGHT","pressed":true},
-  {"type":"wait","duration":1.0},
+  {"type":"action","action":"ui_right","duration":0.3},
+  {"type":"wait","duration":0.2},
   {"type":"key","key":"SPACE","pressed":true}
 ]}'
+
+# Record and replay input
+bun ws_send.ts start_recording
+# ... play the game ...
+bun ws_send.ts stop_recording
+bun ws_send.ts replay_recording '{"speed":2.0}'
 ```
 
 ### Batch & Compact Modes
@@ -301,14 +311,15 @@ bun skill/ws_send.ts --listen
 The runtime bridge provides true game-side introspection by running an autoload script inside the game process that connects back to the editor via WebSocket (port 9081):
 
 - `get_game_scene_tree` — live scene hierarchy from the actual game process
-- `get_game_node_properties` / `set_game_node_properties` — read/write game node state
+- `get_game_node_properties` — read game node state with filtered reads (`mode`: `gameplay`, `transform`, `physics`, `ui`, `all`; `properties` whitelist; `exclude_defaults`)
+- `set_game_node_properties` — write game node state with optional `verify_after_write` to detect when game logic overwrites a value
 - `monitor_properties` — track property changes over time
 - `execute_game_script` — run arbitrary GDScript in the game context
 - `capture_frames` — screenshot from the game viewport (not the editor)
 - `find_ui_elements` / `click_button_by_text` — interact with game UI
-- `get_bridge_status` — check bridge connection status
+- `get_bridge_status` — check bridge connection status, enable command tracing for diagnostics
 
-When the bridge is not connected, commands fall back to the editor tree with a `_fallback` flag.
+When the bridge is not connected, commands fall back to the editor tree with a `_fallback` flag. Long-running commands (replay, sequence, screenshot) use a 60-second timeout instead of the default 10 seconds.
 
 ### Structured Script Patching
 
@@ -332,19 +343,24 @@ Validate scripts for compilation errors:
 
 ### Testing with Assertion Operators
 
-Enhanced test scenarios with 10 step types and rich assertions:
+Enhanced test scenarios with 14 step types and rich assertions:
 
 ```bash
-bun ws_send.ts run_test_scenario '{"name":"Jump Test","steps":[
-  {"type":"input_action","action":"jump","pressed":true},
+bun ws_send.ts run_test_scenario '{"name":"Movement Test","steps":[
+  {"type":"input_action","action":"ui_right","pressed":true},
   {"type":"wait","duration":0.5},
-  {"type":"assert_property","node_path":"Player","property":"position.y","operator":"<","expected":0},
-  {"type":"assert_exists","node_path":"Player/JumpParticles"},
-  {"type":"assert_text","text":"Score:"}
+  {"type":"input_action","action":"ui_right","pressed":false},
+  {"type":"assert_property_range","node_path":"Player","property":"position.x","min":50,"max":500},
+  {"type":"wait_for_property","node_path":"Player","property":"velocity.x","expected":0,"timeout":2.0},
+  {"type":"assert_text","text":"Score:"},
+  {"type":"assert_node_count","type":"CharacterBody2D","expected":1},
+  {"type":"wait_for_text","text":"Level Complete","timeout":10.0}
 ]}'
 ```
 
-Operators: `==`, `!=`, `>`, `>=`, `<`, `<=`, `contains`, `matches` (regex), `approx`. Nested property paths supported (`position.x`, `velocity.y`).
+Step types: `wait`, `input_action`, `input_key`, `click_ui`, `assert_property`, `assert_property_range`, `assert_exists`, `assert_text`, `assert_node_count`, `assert_signal_emitted`, `assert_scene`, `capture_snapshot`, `wait_for_property`, `wait_for_text`.
+
+Operators: `==`, `!=`, `>`, `>=`, `<`, `<=`, `contains`, `matches` (regex), `approx`. Nested property paths supported (`position.x`, `velocity.y`, `modulate.r`).
 
 ### Command Discovery & Schemas
 
