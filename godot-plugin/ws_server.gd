@@ -30,6 +30,8 @@ var _last_disconnect: Dictionary = {}
 
 func _init(port: int = DEFAULT_PORT):
 	_port = port
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	set_process(false)
 
 
 func start() -> Error:
@@ -38,6 +40,7 @@ func start() -> Error:
 	if err != OK:
 		push_error("[GodotClaude] Failed to start WebSocket server on port %d: %s" % [_port, error_string(err)])
 		return err
+	set_process(true)
 	print("[GodotClaude] WebSocket server listening on ws://127.0.0.1:%d" % _port)
 	return OK
 
@@ -52,7 +55,12 @@ func stop() -> void:
 	if _server:
 		_server.stop()
 		_server = null
+	set_process(false)
 	print("[GodotClaude] WebSocket server stopped")
+
+
+func _process(_delta: float) -> void:
+	poll()
 
 
 func poll() -> void:

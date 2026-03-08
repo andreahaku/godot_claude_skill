@@ -41,6 +41,10 @@ var _total_requests_sent: int = 0
 var _total_timeouts: int = 0
 var _total_disconnects: int = 0
 
+func _init() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	set_process(false)
+
 
 func start() -> Error:
 	_server = TCPServer.new()
@@ -48,6 +52,7 @@ func start() -> Error:
 	if err != OK:
 		push_error("[BridgeServer] Failed to start on port %d: %s" % [BRIDGE_PORT, error_string(err)])
 		return err
+	set_process(true)
 	print("[BridgeServer] Listening on ws://127.0.0.1:%d for game bridge connections" % BRIDGE_PORT)
 	return OK
 
@@ -64,7 +69,12 @@ func stop() -> void:
 	if _server:
 		_server.stop()
 		_server = null
+	set_process(false)
 	print("[BridgeServer] Stopped")
+
+
+func _process(_delta: float) -> void:
+	poll()
 
 
 func poll() -> void:

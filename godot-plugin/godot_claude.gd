@@ -160,10 +160,6 @@ func _exit_tree() -> void:
 
 
 func _process(delta: float) -> void:
-	if _ws:
-		_ws.poll()
-	if _bridge_server:
-		_bridge_server.poll()
 	# Detect game start/stop
 	if _event_bus:
 		var ei = get_editor_interface()
