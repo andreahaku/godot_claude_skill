@@ -389,18 +389,23 @@ bun ws_send.ts health_check
 bun ws_send.ts doctor
 ```
 
+#### Transport Modes
+
+| Mode | Status | Use case | Invocation |
+|------|--------|----------|------------|
+| **Batch** | Recommended | Claude agent use (one or more commands) | `echo '...' \| bun ws_send.ts --batch` |
+| **Single** | Best-effort | Quick one-off commands | `bun ws_send.ts <command> '<params>'` |
+| **Listen** | Supported | Interactive human session | `bun ws_send.ts --listen` |
+| **Broker** | Optional | Persistent connection proxy | `GODOT_USE_BROKER=1 bun ws_send.ts ...` |
+
+**Batch** mode is the recommended path for programmatic use. It opens a single WebSocket connection per invocation and sends all commands over it, which avoids the short-lived connection issues that affect one-shot mode. Even for a single command, wrapping it in batch is more reliable than the single path.
+
+**Single** mode (one process per command) works but is best-effort: the short-lived WebSocket connection sometimes fails to complete the handshake before the process lifecycle ends. The client retries up to 10 times by default, but success is not guaranteed.
+
 Notes:
-- `health_check` now includes detailed WebSocket and bridge diagnostics (active peers, rejected/pruned connections, pending bridge requests, recent disconnect info)
-- `reload_plugin` is intentionally conservative for `GodotClaudeSkill` itself: manual disable/enable from `Project Settings > Plugins` is the supported path for self-reload
-- `skill/ws_send.ts` now retries short transient connection failures by default, which helps during rapid command bursts while the editor socket is recovering
-- for rapid multi-command workflows, prefer a persistent connection:
-  - `--batch` for scripted sequences
-  - `--listen` for interactive sessions
-  - `--listen` now sends periodic heartbeat pings to keep the connection healthy
-- experimental persistent broker support exists via `skill/ws_broker.ts`
-  - validated path: run `bun skill/ws_broker.ts` in a dedicated terminal, then invoke commands with `GODOT_USE_BROKER=1 bun skill/ws_send.ts ...`
-  - supported mode: manual broker foreground process
-  - `ws_send.ts` no longer silently falls back to direct mode when `GODOT_USE_BROKER=1`; it now returns an explicit broker error
+- `health_check` includes WebSocket and bridge diagnostics (active peers, rejected/pruned connections, pending bridge requests)
+- `reload_plugin` is intentionally conservative for `GodotClaudeSkill` itself: manual disable/enable from Project Settings > Plugins is the supported path
+- `--listen` sends periodic heartbeat pings to keep the connection healthy
 
 ### Smart Node Lookup
 
@@ -867,7 +872,11 @@ Error responses:
 | Variable | Default | Description |
 |---|---|---|
 | `GODOT_WS_URL` | `ws://127.0.0.1:9080` | WebSocket URL for the plugin |
-| `GODOT_TIMEOUT` | `30000` | Connection timeout in ms |
+| `GODOT_TIMEOUT` | `30000` | Response timeout in ms |
+| `GODOT_CONNECT_RETRIES` | `10` | Connection retry attempts (single mode only) |
+| `GODOT_CONNECT_RETRY_DELAY_MS` | `500` | Delay between retries in ms |
+| `GODOT_WS_TRACE` | `0` | Set to `1` for structured trace output on stderr |
+| `GODOT_USE_BROKER` | `0` | Set to `1` to route through broker process |
 
 ## Troubleshooting
 

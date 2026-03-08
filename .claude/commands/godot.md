@@ -472,7 +472,7 @@ These are useful for reviewing changes before committing or understanding what h
 14. Use `create_from_template` / `scaffold_script` to quickly bootstrap common game patterns
 15. Use `doctor` to diagnose plugin issues (handler status, command counts, bridge status)
 16. Use `get_output_log` / `get_runtime_errors` to check for runtime issues without switching to Godot
-17. For rapid multi-command workflows, prefer `bun ws_send.ts --batch` or `batch_execute` over many one-shot WebSocket calls
-18. For interactive sessions, prefer `bun ws_send.ts --listen`; it now sends heartbeat pings to keep the connection alive
-19. Supported broker mode: run `bun skill/ws_broker.ts` in a dedicated terminal and then use `GODOT_USE_BROKER=1 bun skill/ws_send.ts ...` to route one-shot commands through a persistent broker process
-20. When `GODOT_USE_BROKER=1`, `ws_send.ts` returns an explicit broker error instead of silently falling back to the direct WebSocket path
+17. Batch mode (`--batch`) is the recommended transport for programmatic use — even single commands can be sent as one JSONL line via stdin for reliable delivery
+18. Single-command one-shot (`bun ws_send.ts <command>`) is best-effort — it may fail with `close code 1006` on some editors. Use `--batch` for more reliable delivery
+19. Use `GODOT_WS_TRACE=1` to get structured diagnostic output on stderr for connection issues
+20. The broker (`ws_broker.ts`) is optional — useful for persistent connection proxy, not required for normal operation

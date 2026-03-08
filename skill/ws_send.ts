@@ -1,28 +1,34 @@
 #!/usr/bin/env bun
 /**
- * WebSocket client for communicating with the GodotClaudeSkill plugin.
+ * WebSocket client for GodotClaudeSkill plugin.
  *
- * Single command:
+ * Recommended for Claude (reliable persistent connection):
+ *   echo '{"command":"cmd","params":{}}' | bun ws_send.ts --batch
+ *
+ * Single command (best-effort, may fail on short-lived connections):
  *   bun ws_send.ts <command> [json_params]
  *
- * Batch mode (reads JSON lines from stdin):
- *   echo '{"command":"add_node","params":{"node_name":"Foo","node_type":"Node2D"}}' | bun ws_send.ts --batch
- *   cat commands.jsonl | bun ws_send.ts --batch
- *
- * Compact output (only success/fail, no full JSON):
- *   bun ws_send.ts --compact add_node '{"node_name":"Foo","node_type":"Node2D"}'
- *
- * Verbose mode (show raw WebSocket messages):
- *   bun ws_send.ts --verbose add_node '{"node_name":"Foo","node_type":"Node2D"}'
- *
- * Listen mode (keep connection open, read commands from stdin interactively):
+ * Interactive mode (persistent connection, human use):
  *   bun ws_send.ts --listen
+ *
+ * Options:
+ *   --compact   Output OK/FAIL instead of full JSON
+ *   --verbose   Show raw WebSocket frames on stderr
+ *   --version   Print version
+ *
+ * Environment:
+ *   GODOT_WS_URL              WebSocket URL (default: ws://127.0.0.1:9080)
+ *   GODOT_TIMEOUT              Response timeout in ms (default: 30000)
+ *   GODOT_CONNECT_RETRIES      Connection retries (default: 10)
+ *   GODOT_CONNECT_RETRY_DELAY_MS  Delay between retries (default: 500)
+ *   GODOT_WS_TRACE=1           Structured trace output on stderr
+ *   GODOT_USE_BROKER=1         Route through broker (requires bun skill/ws_broker.ts running)
  */
 
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 
-const CLIENT_VERSION = "1.1.0";
+const CLIENT_VERSION = "1.2.0";
 const WS_URL = process.env.GODOT_WS_URL || "ws://127.0.0.1:9080";
 const TIMEOUT_MS = parseInt(process.env.GODOT_TIMEOUT || "30000", 10);
 const CONNECT_RETRIES = parseInt(process.env.GODOT_CONNECT_RETRIES || "10", 10);
@@ -31,6 +37,7 @@ const BROKER_DIR = process.env.GODOT_BROKER_DIR || "/tmp/godot_claude_ws_broker"
 const BROKER_HEARTBEAT_PATH = `${BROKER_DIR}/heartbeat.json`;
 const BROKER_TIMEOUT_MS = parseInt(process.env.GODOT_BROKER_TIMEOUT || "45000", 10);
 const USE_BROKER = process.env.GODOT_USE_BROKER === "1";
+const TRACE_WS = process.env.GODOT_WS_TRACE === "1";
 
 interface CommandMsg {
   id: string;
@@ -64,22 +71,32 @@ function log_verbose(direction: ">>>" | "<<<", data: string) {
   }
 }
 
+function log_trace(event: string, details: Record<string, unknown> = {}) {
+  if (!TRACE_WS) return;
+  console.error(JSON.stringify({
+    scope: "ws_send",
+    event,
+    ts: Date.now(),
+    ...details,
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Single command (best-effort, connection may fail on short-lived processes)
+// ---------------------------------------------------------------------------
+
 async function sendSingle(command: string, params: Record<string, unknown>, compact: boolean) {
   if (USE_BROKER) {
     try {
       const data = await sendViaBroker(command, params);
-      if (compact) {
-        console.log(data.success ? "OK" : `FAIL: ${data.error || "unknown"}`);
-      } else {
-        console.log(JSON.stringify(data, null, 2));
-      }
+      outputResponse(data, compact);
       process.exit(data.success ? 0 : 1);
     } catch (err) {
       console.error(JSON.stringify({
         success: false,
         error: String(err),
         broker_dir: BROKER_DIR,
-        help: "Start the broker manually with `bun skill/ws_broker.ts`, then retry with GODOT_USE_BROKER=1.",
+        help: "Start the broker with: bun skill/ws_broker.ts",
       }));
       process.exit(1);
     }
@@ -89,23 +106,14 @@ async function sendSingle(command: string, params: Record<string, unknown>, comp
 
   for (let attempt = 1; attempt <= CONNECT_RETRIES; attempt++) {
     try {
-      const results = await sendCommandsOverSingleConnection([{
-        id: crypto.randomUUID(),
-        command,
-        params,
-      }]);
-      const data = results[0].response;
-      if (compact) {
-        console.log(data.success ? "OK" : `FAIL: ${data.error || "unknown"}`);
-      } else {
-        console.log(JSON.stringify(data, null, 2));
-      }
+      const data = await sendSingleCommand(command, params, attempt);
+      outputResponse(data, compact);
       process.exit(data.success ? 0 : 1);
     } catch (err) {
       lastError = err;
+      log_trace("attempt_failed", { command, attempt, error: String(err) });
       if (attempt < CONNECT_RETRIES) {
         await sleep(CONNECT_RETRY_DELAY_MS);
-        continue;
       }
     }
   }
@@ -118,6 +126,110 @@ async function sendSingle(command: string, params: Record<string, unknown>, comp
   }));
   process.exit(1);
 }
+
+function outputResponse(data: ResponseMsg, compact: boolean) {
+  if (compact) {
+    console.log(data.success ? "OK" : `FAIL: ${data.error || "unknown"}`);
+  } else {
+    console.log(JSON.stringify(data, null, 2));
+  }
+}
+
+async function sendSingleCommand(
+  command: string,
+  params: Record<string, unknown>,
+  attempt: number,
+): Promise<ResponseMsg> {
+  const id = crypto.randomUUID();
+  return await new Promise<ResponseMsg>((resolve, reject) => {
+    const ws = new WebSocket(WS_URL);
+    let settled = false;
+    let responseTimeout: Timer | null = null;
+
+    const connectTimeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      log_trace("connect_timeout", { command, attempt, id });
+      ws.close();
+      reject(new Error("WebSocket connection timed out"));
+    }, TIMEOUT_MS);
+
+    log_trace("connect_start", { command, attempt, id, url: WS_URL });
+
+    ws.addEventListener("open", () => {
+      clearTimeout(connectTimeout);
+      log_trace("open", { command, attempt, id });
+      const msg = JSON.stringify({ id, command, params });
+      log_verbose(">>>", msg);
+      ws.send(msg);
+      responseTimeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        log_trace("response_timeout", { command, attempt, id });
+        ws.close();
+        reject(new Error("WebSocket response timed out"));
+      }, TIMEOUT_MS);
+    });
+
+    ws.addEventListener("message", (event) => {
+      if (settled) return;
+      log_verbose("<<<", event.data as string);
+      try {
+        const data = JSON.parse(event.data as string) as ResponseMsg;
+        if (data.id !== id) return;
+        settled = true;
+        clearTimeout(connectTimeout);
+        if (responseTimeout) clearTimeout(responseTimeout);
+        log_trace("response", { command, attempt, id, success: data.success });
+        ws.close();
+        resolve(data);
+      } catch (err) {
+        settled = true;
+        clearTimeout(connectTimeout);
+        if (responseTimeout) clearTimeout(responseTimeout);
+        log_trace("parse_error", { command, attempt, id, error: String(err) });
+        ws.close();
+        reject(new Error("Invalid response from WebSocket server"));
+      }
+    });
+
+    ws.addEventListener("error", (event) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(connectTimeout);
+      if (responseTimeout) clearTimeout(responseTimeout);
+      log_trace("error", {
+        command,
+        attempt,
+        id,
+        type: event.type,
+        readyState: ws.readyState,
+      });
+      reject(new Error("WebSocket connection failed"));
+    });
+
+    ws.addEventListener("close", (event) => {
+      clearTimeout(connectTimeout);
+      if (responseTimeout) clearTimeout(responseTimeout);
+      log_trace("close", {
+        command,
+        attempt,
+        id,
+        code: event.code,
+        reason: event.reason || "",
+        wasClean: event.wasClean,
+        readyState: ws.readyState,
+      });
+      if (settled) return;
+      settled = true;
+      reject(new Error("WebSocket closed before response was received"));
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Broker path (optional, for high-throughput scenarios)
+// ---------------------------------------------------------------------------
 
 async function sendViaBroker(command: string, params: Record<string, unknown>): Promise<ResponseMsg> {
   await ensureBrokerRunning();
@@ -155,7 +267,7 @@ async function ensureBrokerRunning() {
     }
     await sleep(500);
   }
-  throw new Error(`Broker not running in ${BROKER_DIR}. Start it manually with: bun skill/ws_broker.ts`);
+  throw new Error(`Broker not running in ${BROKER_DIR}. Start it with: bun skill/ws_broker.ts`);
 }
 
 async function heartbeatFresh(): Promise<boolean> {
@@ -170,8 +282,11 @@ async function heartbeatFresh(): Promise<boolean> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Batch mode (multiple commands over single connection)
+// ---------------------------------------------------------------------------
+
 async function sendBatch(compact: boolean) {
-  // Read all lines from stdin
   const input = await Bun.stdin.text();
   const lines = input.trim().split("\n").filter((l) => l.trim());
 
@@ -180,7 +295,6 @@ async function sendBatch(compact: boolean) {
     process.exit(1);
   }
 
-  // Parse all commands
   const commands: CommandMsg[] = [];
   for (const line of lines) {
     try {
@@ -216,7 +330,9 @@ async function sendBatch(compact: boolean) {
   process.exit(results.some((r) => !r.success) ? 1 : 0);
 }
 
-async function sendCommandsOverSingleConnection(commands: CommandMsg[]): Promise<BatchResult[]> {
+async function sendCommandsOverSingleConnection(
+  commands: CommandMsg[],
+): Promise<BatchResult[]> {
   return await new Promise<BatchResult[]>((resolve, reject) => {
     const ws = new WebSocket(WS_URL);
     const pending = new Map<string, CommandMsg>();
@@ -226,11 +342,13 @@ async function sendCommandsOverSingleConnection(commands: CommandMsg[]): Promise
 
     const timeout = setTimeout(() => {
       settled = true;
+      log_trace("batch_timeout", { sent, received: results.length, expected: commands.length });
       ws.close();
       reject(new Error("Batch timeout"));
     }, TIMEOUT_MS * 2);
 
     ws.addEventListener("open", () => {
+      log_trace("batch_open", { command_count: commands.length });
       sendNext();
     });
 
@@ -266,6 +384,7 @@ async function sendCommandsOverSingleConnection(commands: CommandMsg[]): Promise
         if (results.length >= commands.length) {
           clearTimeout(timeout);
           settled = true;
+          log_trace("batch_complete", { expected: commands.length, received: results.length });
           ws.close();
           resolve(results);
         }
@@ -278,20 +397,28 @@ async function sendCommandsOverSingleConnection(commands: CommandMsg[]): Promise
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      log_trace("batch_error", { sent, received: results.length });
       reject(new Error("WebSocket connection failed"));
     });
 
-    ws.addEventListener("close", () => {
+    ws.addEventListener("close", (event) => {
       if (settled) return;
       clearTimeout(timeout);
-      if (results.length >= commands.length) {
-        return;
-      }
+      if (results.length >= commands.length) return;
       settled = true;
+      log_trace("batch_close", {
+        code: event.code,
+        sent,
+        received: results.length,
+      });
       reject(new Error("WebSocket closed before all responses were received"));
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// Listen mode (interactive, persistent connection)
+// ---------------------------------------------------------------------------
 
 async function listenMode() {
   const ws = new WebSocket(WS_URL);
@@ -378,6 +505,10 @@ async function listenMode() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
 async function main() {
   const args = process.argv.slice(2);
 
@@ -387,14 +518,17 @@ async function main() {
   }
 
   if (args.length === 0) {
-    console.error(`Usage:
-  bun ws_send.ts <command> [json_params]           Single command
-  bun ws_send.ts --compact <command> [json_params]  Compact output (OK/FAIL)
-  bun ws_send.ts --verbose <command> [json_params]  Show raw WebSocket messages
-  bun ws_send.ts --listen                           Interactive persistent connection
-  bun ws_send.ts --version                          Print version and exit
-  echo '{"command":"x","params":{}}' | bun ws_send.ts --batch    Batch from stdin
-  cat commands.jsonl | bun ws_send.ts --batch --compact          Batch compact`);
+    console.error(`ws_send.ts v${CLIENT_VERSION} — GodotClaudeSkill WebSocket client
+
+Usage:
+  bun ws_send.ts <command> [json_params]      Single command (best-effort)
+  bun ws_send.ts --batch < commands.jsonl      Batch over single connection (recommended)
+  bun ws_send.ts --listen                      Interactive persistent session
+
+Options:
+  --compact   OK/FAIL output instead of full JSON
+  --verbose   Show raw WebSocket frames
+  --version   Print version`);
     process.exit(1);
   }
 
@@ -404,7 +538,7 @@ async function main() {
   const listen = args.includes("--listen");
 
   if (verbose) {
-    console.error(`ws_send.ts v${CLIENT_VERSION} | ${WS_URL} | timeout=${TIMEOUT_MS}ms`);
+    console.error(`ws_send.ts v${CLIENT_VERSION} | ${WS_URL} | timeout=${TIMEOUT_MS}ms | retries=${CONNECT_RETRIES}`);
   }
   const filteredArgs = args.filter((a) => !a.startsWith("--"));
 
